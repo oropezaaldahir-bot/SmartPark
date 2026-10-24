@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set sub = "ADMIN" %}
+{% block title %}SmartPark · Confirmar{% endblock %}
+{% block body %}
+<main class="wrap center">
+  <div class="card confirm">
+    <div class="dh">
+      <div class="dw" aria-hidden="true">!</div>
+      <h3>{{ info.title }}</h3>
+    </div>
+    <div class="db">{{ info.body }}</div>
+    <form method="post" action="{{ url_for('admin.do_action', action=action) }}">
+      {% for k, v in fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}" />{% endfor %}
+      <div class="da">
+        <a class="btn ghost" href="{{ back }}" autofocus>No, volver</a>
+        <button class="btn{{ ' danger' if info.danger }}" type="submit">{{ info.ok }}</button>
+      </div>
+    </form>
+  </div>
+</main>
+{% endblock %}
