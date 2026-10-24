@@ -1,0 +1,9 @@
+Flask>=3.0
+Flask-SQLAlchemy>=3.1
+Pillow>=10.1
+tzdata
+pytest
+# Solo si usas otro motor SQL (descomenta el que necesites):
+# pymysql            # MySQL / MariaDB
+# psycopg2-binary    # PostgreSQL
+# pyodbc             # SQL Server

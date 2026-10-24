@@ -1,0 +1,6 @@
+# Solo para la cámara (main.py). La página web NO necesita esto.
+# Instala primero requirements.txt y luego este archivo.
+opencv-python
+easyocr
+ultralytics        # YOLO (instala PyTorch; es pesado)
+numpy
