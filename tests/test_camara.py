@@ -12,7 +12,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 import logic as L  # noqa: E402
 from app import app  # noqa: E402
-from models import Reservation, db  # noqa: E402
+from models import Plate, Reservation, db  # noqa: E402
 from modulos import registro  # noqa: E402
 from modulos.placas import extraer_placa  # noqa: E402
 
@@ -47,64 +47,66 @@ def test_extraer_placa_invalida():
     assert extraer_placa("MEXICO 2026") == (None, "Inválida")
 
 
-# ------------------------------------------------------------------ registro en la base
-def test_entrada_nueva_desde_camara(limpia):
-    estado, msg = registro.registrar_entrada("PCH9604", "Automóvil")
-    assert estado == "walkin" and "Entrada registrada" in msg and "SP-" in msg
-    r = fila("PCH-9604")
-    assert r.status == "in" and r.source == "camara" and r.vehicle_type == "Automóvil" and r.walkin
-    # la misma placa otra vez: avisa que ya está dentro y NO duplica
-    estado, msg = registro.registrar_entrada("PCH9604", "Automóvil")
-    assert estado == "inside" and "Ya está dentro" in msg
+# ------------------------------------------------------------------ guardar placas en la base
+def placa(norm_):
     with app.app_context():
-        assert Reservation.query.filter(Reservation.plate == "PCH-9604").count() == 1
+        return Plate.query.filter_by(plate_norm=norm_).first()
 
 
-def test_camara_confirma_reserva(limpia):
+def test_camara_guarda_placa_nueva(limpia):
+    estado, msg = registro.registrar_placa("PCH9604", "Automóvil")
+    assert estado == "new" and "guardada" in msg
+    p = placa("PCH9604")
+    assert p.plate == "PCH-9604" and p.vehicle_type == "Automóvil" and p.hits == 1
+    # la cámara NO abre boleto: la entrada se hace después en /acceso
     with app.app_context():
-        db.session.add(Reservation(code="SP-7777", plate="RES-4321", spot="F02", start=L.now() - timedelta(minutes=2),
-                                   status="reserved", source="web"))
-        db.session.commit()
-    estado, msg = registro.registrar_entrada("RES4321", "Automóvil")
-    assert estado == "checkin" and "F02" in msg
-    r = fila("RES-4321")
-    assert r.status == "in" and r.spot == "F02" and r.source == "web" and r.vehicle_type == "Automóvil"
+        assert Reservation.query.filter(Reservation.plate == "PCH-9604").count() == 0
 
 
-def test_camara_reserva_muy_temprano(limpia):
+def test_camara_misma_placa_no_duplica(limpia):
+    registro.registrar_placa("PCH9604", "Automóvil")
+    estado, msg = registro.registrar_placa("pch 96-04", "Automóvil")
+    assert estado == "known" and "ya estaba" in msg
     with app.app_context():
-        db.session.add(Reservation(code="SP-7778", plate="TMP-1234", spot="F03", start=L.now() + timedelta(hours=3), status="reserved"))
-        db.session.commit()
-    estado, msg = registro.registrar_entrada("TMP1234", "Automóvil")
-    assert estado == "early" and fila("TMP-1234").status == "reserved"
+        assert Plate.query.count() == 1 and placa("PCH9604").hits == 2
 
 
-def test_estacionamiento_lleno(limpia):
+def test_placa_guardada_por_camara_puede_entrar_por_acceso(limpia):
+    c = app.test_client()
+    assert "Placa no registrada" in c.post("/acceso", data={"placa": "PCH9604"}).get_data(as_text=True)
+    registro.registrar_placa("PCH9604", "Automóvil")
+    r = c.post("/acceso", data={"placa": "PCH9604"})
+    assert r.status_code == 302
     with app.app_context():
-        occ = L.occupancy()
-        for s, v in occ.items():
-            if v == "free":
-                db.session.add(Reservation(code=L.new_code(), plate="LLE-" + s, spot=s, start=L.now(), checkin=L.now(), status="in"))
-        db.session.commit()
-    assert registro.registrar_entrada("ZZZ9999", "Automóvil")[0] == "full"
+        w = Reservation.query.filter_by(plate="PCH-9604").one()
+        assert w.status == "in" and w.source == "web"
+
+
+def test_placa_incompleta_no_se_guarda(limpia):
+    assert registro.registrar_placa("AB", "Automóvil")[0] == "invalid"
+    with app.app_context():
+        assert Plate.query.count() == 0
 
 
 def test_base_caida_no_rompe_la_camara(limpia, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("base caída")
-    monkeypatch.setattr(L, "register_entry", boom)
-    estado, msg = registro.registrar_entrada("PCH9604", "Automóvil")
+    monkeypatch.setattr(L, "save_plate", boom)
+    estado, msg = registro.registrar_placa("PCH9604", "Automóvil")
     assert estado == "error" and "base de datos" in msg
 
 
-def test_lo_registrado_por_la_camara_sale_en_el_panel_admin(limpia):
-    registro.registrar_entrada("PCH9604", "Motocicleta")
-    c = app.test_client()
-    from admin import _LOCKS
-    _LOCKS.clear()
-    c.post("/admin/login", data={"usr": "admin", "pwd": "smartpark2026"})
-    html = c.get("/admin/?q=pch9604").get_data(as_text=True)
-    assert "PCH-9604" in html and "Cámara" in html and "Motocicleta" in html
+def test_register_entry_conserva_reglas_de_reserva(limpia):
+    """La lógica de reservas sigue igual (sin only_known, como la usa el admin)."""
+    with app.app_context():
+        db.session.add(Reservation(code="SP-7777", plate="RES-4321", spot="F02", start=L.now() - timedelta(minutes=2),
+                                   status="reserved", source="web"))
+        db.session.add(Reservation(code="SP-7778", plate="TMP-1234", spot="F03", start=L.now() + timedelta(hours=3), status="reserved"))
+        db.session.commit()
+        assert L.register_entry("RES4321", "web", "Automóvil", only_known=True)["status"] == "checkin"
+        assert L.register_entry("TMP1234", "web", only_known=True)["status"] == "early"
+        assert L.register_entry("ZZZ9999", "web", only_known=True)["status"] == "unknown"
+        assert L.register_entry("ZZZ9999")["status"] == "walkin"
 
 
 # ------------------------------------------------------------------ main.py con cámara simulada
@@ -143,23 +145,23 @@ def _correr_main(monkeypatch, teclas, texto_ocr):
 
 def test_main_detectar_confirmar_y_guardar(limpia, monkeypatch):
     d = _correr_main(monkeypatch, [32, 13, 113], "EDOMEX PCH 96 04")
-    assert ("PCH9604 - Automóvil", "ENTER = registrar entrada") in d   # tras ESPACIO pide confirmar
-    r = fila("PCH-9604")
-    assert r and r.status == "in" and r.source == "camara"
-    assert "Entrada registrada" in d[-1][1] or any("Entrada registrada" in e for _, e in d)
+    assert ("PCH9604 - Automóvil", "ENTER = guardar placa") in d   # tras ESPACIO pide confirmar
+    p = placa("PCH9604")
+    assert p and p.vehicle_type == "Automóvil"
+    assert any("guardada" in e for _, e in d)
 
 
 def test_main_enter_sin_detectar_no_registra(limpia, monkeypatch):
     d = _correr_main(monkeypatch, [13, 113], "EDOMEX PCH 96 04")
     assert any("Primero detecta" in e for _, e in d)
-    assert fila("PCH-9604") is None
+    assert placa("PCH9604") is None
 
 
 def test_main_texto_ilegible_no_registra(limpia, monkeypatch):
     d = _correr_main(monkeypatch, [32, 13, 113], "MEXICO 2026")
     assert any(t == "Placa no reconocida" for t, _ in d)
     with app.app_context():
-        assert Reservation.query.filter_by(source="camara").count() == 0
+        assert Plate.query.count() == 0
 
 
 # ------------------------------------------------------------------ interfaz real (si hay OpenCV)
@@ -188,7 +190,7 @@ def test_migracion_agrega_columnas(tmp_path):
     code = ("import os,sys;sys.path.insert(0,%r);os.environ['DATABASE_URL']='sqlite:///%s';os.environ['SEED_DEMO']='0';"
             "from app import app;from models import Reservation;"
             "ctx=app.app_context();ctx.push();"
-            "import logic as L;print(L.register_entry('NEW1234',source='camara',vehicle_type='Automóvil')['status']);"
+            "import logic as L;print(L.register_entry('NEW1234',source='web',vehicle_type='Automóvil')['status']);"
             "print(Reservation.query.get('SP-0001').plate)") % (ROOT, str(dbf).replace("\\", "/"))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr

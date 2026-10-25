@@ -24,6 +24,8 @@ def client():
         db.drop_all()
         db.create_all()
         L.seed_demo()
+        for p in ("XYZ1234", "GAT5678", "CAN4444"):  # placas que la cámara ya guardó
+            L.save_plate(p, "Automóvil")
     with app.test_client() as c:
         yield c
 
@@ -246,3 +248,50 @@ def test_admin_confirmar_reserva_usa_cajon_elegido(client):
     login(client)
     c = client.get("/admin/confirmar/reservar", query_string=dict(sel="F03", placa="adm 9876", area_cur="F")).get_data(as_text=True)
     assert "F03" in c and "ADM-9876" in c and 'name="spot" value="F03"' in c
+
+
+def test_acceso_solo_placas_guardadas(client):
+    # placa que la cámara nunca vio: no entra y no se crea ningún boleto
+    r = client.post("/acceso", data={"placa": "NUE9999"})
+    assert r.status_code == 200 and "Placa no registrada" in r.get_data(as_text=True)
+    with app.app_context():
+        assert Reservation.query.filter_by(plate="NUE-9999").count() == 0
+    # la cámara la guarda -> ahora sí entra
+    with app.app_context():
+        assert L.save_plate("nue 9999", "Automóvil")[0] == "new"
+    r = client.post("/acceso", data={"placa": "NUE9999"})
+    assert r.status_code == 302
+    with app.app_context():
+        assert Reservation.query.filter_by(plate="NUE-9999", status="in").count() == 1
+
+
+def test_acceso_permite_reserva_y_empleado(client):
+    with app.app_context():
+        db.session.add(Employee(name="Ana", plate="EMP-001", plate_norm="EMP001"))
+        db.session.commit()
+    assert client.post("/acceso", data={"placa": "emp 001"}).status_code == 302   # empleado
+    assert client.post("/acceso", data={"placa": "DEMO3"}).status_code == 200      # reserva demo: aún es temprano
+    with app.app_context():
+        assert L.plate_known("demo3") and not L.plate_known("QQQ1111")
+
+
+def test_grafica_cuenta_entradas_reales_por_dia(client):
+    from datetime import timedelta
+    with app.app_context():
+        antes = [v for _, v in L.entries_by_day(7)]
+        assert len(antes) == 7 and antes[-1] == 4  # hoy: las 4 DEMO que ya entraron
+        # un carro más hoy y dos hace 2 días: sube solo la barra de ese día
+        for code, dias in (("SP-9001", 0), ("SP-9002", 2), ("SP-9003", 2)):
+            t = L.now() - timedelta(days=dias, minutes=5)
+            db.session.add(Reservation(code=code, plate=code, spot="D01", start=t, checkin=t, status="done"))
+        db.session.commit()
+        despues = [v for _, v in L.entries_by_day(7)]
+        assert despues[-1] == antes[-1] + 1 and despues[-3] == antes[-3] + 2
+        assert sum(despues) == sum(antes) + 3
+        # los que entran por la web también cuentan
+    client.post("/acceso", data={"placa": "XYZ1234"})
+    with app.app_context():
+        assert L.entries_by_day(7)[-1][1] == despues[-1] + 1
+    login(client)
+    html = client.get("/admin/").get_data(as_text=True)
+    assert "últimos 7 días" in html and "entradas</title>" in html

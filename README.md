@@ -14,7 +14,7 @@ La primera vez crea las tablas y carga 8 vehículos DEMO.
 ## Rutas
 | Ruta | Qué es |
 |---|---|
-| `/acceso` | Entrada por placa |
+| `/acceso` | Entrada por placa (solo placas que la cámara ya guardó, con reserva o de empleados) |
 | `/boleto` | Boleto, pago en línea y descarga PNG |
 | `/reservar` | Reservación con tarifa por día y hora |
 | `/pasarela/` | Pasarela de pago **simulada** |
@@ -24,13 +24,13 @@ Administrador por defecto: `admin` / `smartpark2026`. Cámbialos con las variabl
 `ADMIN_USER` y `ADMIN_PASS` (o `ADMIN_PASS_HASH`, generado con `werkzeug.security.generate_password_hash`).
 
 ## Cámara y reconocimiento de placas (main.py)
-La cámara usa la **misma base de datos** y las **mismas reglas** que la web (`logic.register_entry`):
-si la placa tiene reserva la confirma, si ya está dentro lo avisa, y si no, asigna el primer cajón libre.
-Lo que registra la cámara aparece al instante en el panel de administrador (con la etiqueta "Cámara" y el tipo de vehículo).
+La cámara **detecta la placa y la guarda** en la tabla `placas` de la misma base de datos que usa la web.
+En `/acceso` solo se deja entrar a una placa si está en la base: guardada por la cámara, con una reserva
+vigente o registrada como empleado. Cualquier otra placa recibe "Placa no registrada" y no se crea boleto.
 
 ```
 pip install -r requirements.txt -r requirements-camara.txt
-python main.py             # ESPACIO = detectar placa · ENTER = registrar en la base · q / ESC = salir
+python main.py             # ESPACIO = detectar placa · ENTER = guardar la placa en la base · q / ESC = salir
 ```
 - Cámara distinta: `set CAMARA_INDICE=0` (Windows) o `CAMARA_INDICE=0 python main.py` (Linux/Mac).
 - Misma base que la web: corre `python app.py` y `python main.py` con el mismo `DATABASE_URL`
@@ -40,9 +40,12 @@ python main.py             # ESPACIO = detectar placa · ENTER = registrar en la
 - Se pide confirmar con ENTER para no guardar una lectura equivocada del OCR.
 - Si la base no responde, la cámara no se cierra: muestra "No se pudo guardar en la base de datos".
 
+## Gráfica del administrador
+Muestra las entradas reales de los últimos 7 días: cada vehículo que entra suma 1 en la barra de su día.
+
 ## Base de datos SQL
 Por defecto usa SQLite (`smartpark.db`). Para MySQL, PostgreSQL o SQL Server, define `DATABASE_URL`
-(ejemplos en `config.py`; el conector va en `requirements.txt`) e instala el conector. Tablas: `reservaciones`, `pagos`, `empleados`
+(ejemplos en `config.py`; el conector va en `requirements.txt`) e instala el conector. Tablas: `reservaciones`, `pagos`, `empleados`, `placas`
 (SQL puro en `base.sql`).
 
 ## Archivos

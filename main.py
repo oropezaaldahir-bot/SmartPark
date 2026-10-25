@@ -1,8 +1,8 @@
 """Módulo principal: orquesta cámara, OCR, interfaz y clasificación de placas.
 
-Flujo:  ESPACIO -> detecta y lee la placa  |  ENTER -> la registra en la base de datos
+Flujo:  ESPACIO -> detecta y lee la placa  |  ENTER -> la guarda en la base de datos
         q / ESC -> salir
-(Se pide confirmar con ENTER para no registrar una lectura equivocada del OCR.)
+(Se pide confirmar con ENTER para no guardar una lectura equivocada del OCR.)
 """
 import os
 
@@ -26,7 +26,7 @@ def main():
     mensaje = ""     # lo que se muestra en pantalla (placa reconocida)
     estado = ""      # resultado del registro en la base de datos
     pendiente = None  # (placa, tipo) leída y esperando ENTER
-    print("ESPACIO -> detectar placa | ENTER -> registrar entrada | q / ESC -> salir")
+    print("ESPACIO -> detectar placa | ENTER -> guardar placa | q / ESC -> salir")
 
     while True:
         ret, frame = camara.leer_frame(cap)
@@ -55,7 +55,7 @@ def main():
             if placa:
                 mensaje = f"{placa} - {tipo}"
                 pendiente = (placa, tipo)
-                estado = "ENTER = registrar entrada"
+                estado = "ENTER = guardar placa"
                 print(f"Placa: {placa} | Tipo: {tipo}")
             else:
                 mensaje = "Placa no reconocida"
@@ -65,7 +65,7 @@ def main():
             if pendiente is None:
                 estado = "Primero detecta una placa (ESPACIO)"
             else:
-                _, estado = registro.registrar_entrada(*pendiente)
+                _, estado = registro.registrar_placa(*pendiente)
                 print("Registro:", estado)
                 pendiente = None
 

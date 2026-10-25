@@ -27,7 +27,7 @@ def dibujar_frame(frame, texto: str, zona=None, titulo: str = "OCR simple", esta
     display = frame.copy()
     if zona is not None:
         cv2.polylines(display, [_a_poligono(zona)], True, (0, 255, 255), 2)
-    cv2.putText(display, "ESPACIO=detectar  ENTER=registrar  Q=salir", (10, 30),
+    cv2.putText(display, "ESPACIO=detectar  ENTER=guardar  Q=salir", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     # La fuente de OpenCV no dibuja acentos: se quitan solo para mostrar
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()

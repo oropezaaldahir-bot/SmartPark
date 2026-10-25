@@ -72,7 +72,7 @@ def acceso():
     err, plate = "", ""
     if request.method == "POST":
         plate = L.fmt_plate(L.norm(request.form.get("placa"))[:7])
-        res = L.register_entry(request.form.get("placa"), source="web")
+        res = L.register_entry(request.form.get("placa"), source="web", only_known=True)
         if res["status"] in ("inside", "checkin", "walkin"):
             session["last"] = res["r"].code
             extra = {"d": 1} if res["status"] == "inside" else {}

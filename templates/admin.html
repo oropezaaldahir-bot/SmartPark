@@ -24,8 +24,8 @@
       {% for label, value, cls in kpis %}<div class="kpi {{ cls }}"><b>{{ value }}</b>{{ label }}</div>{% endfor %}
     </div>
     <div class="card chart">
-      <h2>Entradas por día de la semana</h2>
-      <svg viewBox="0 0 400 200" role="img" aria-label="Entradas por día de la semana">{{ chart }}</svg>
+      <h2>Entradas por día (últimos 7 días)</h2>
+      <svg viewBox="0 0 400 200" role="img" aria-label="Entradas por día, últimos 7 días">{{ chart }}</svg>
     </div>
   </section>
 

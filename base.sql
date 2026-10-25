@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS empleados (
     plate_norm  VARCHAR(10) NOT NULL UNIQUE       -- ABC123
 );
 
+-- Placas que la cámara detectó y guardó: solo estas (más reservas y empleados) pueden entrar por /acceso
+CREATE TABLE IF NOT EXISTS placas (
+    id            INTEGER PRIMARY KEY,
+    plate         VARCHAR(10) NOT NULL,           -- ABC-123
+    plate_norm    VARCHAR(10) NOT NULL UNIQUE,    -- ABC123
+    vehicle_type  VARCHAR(12) NULL,               -- Automóvil | Motocicleta | Camión
+    first_seen    TIMESTAMP   NOT NULL,
+    last_seen     TIMESTAMP   NOT NULL,
+    hits          INTEGER     NOT NULL DEFAULT 1  -- veces que la cámara la detectó
+);
+
 -- Si ya tenías la tabla de una versión anterior, agrega las columnas nuevas:
 --   ALTER TABLE reservaciones ADD COLUMN vehicle_type VARCHAR(12);
 --   ALTER TABLE reservaciones ADD COLUMN source VARCHAR(10);

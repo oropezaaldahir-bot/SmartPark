@@ -1,28 +1,29 @@
 """Módulo de registro: conecta el reconocimiento de placas con la base de datos de SmartPark.
 
-Usa la MISMA base de datos (config.DATABASE_URL) y las MISMAS reglas que la página web
-(logic.register_entry): si la placa tiene reserva la confirma, si ya está dentro lo avisa
-y si no, le asigna el primer cajón libre. Lo que registra la cámara aparece al instante
-en el panel de administrador.
+La cámara GUARDA cada placa que lee en la tabla `placas` (misma base que la web, config.DATABASE_URL).
+Después, en la página /acceso solo se deja entrar a las placas que están guardadas
+(o que tienen reserva / son de un empleado). Así la cámara es quien da de alta los vehículos.
 """
 from app import app  # al importar crea las tablas si no existen
 import logic as L
 from models import db
 
 
-def registrar_entrada(placa: str, tipo: str = None):
-    """Registra la entrada de una placa. Devuelve (estado, mensaje para mostrar).
+def registrar_placa(placa: str, tipo: str = None):
+    """Guarda una placa detectada. Devuelve (estado, mensaje para mostrar).
 
-    estado: walkin | checkin | inside | early | full | invalid | error
+    estado: new | known | invalid | error
     Nunca lanza excepciones: si la base falla devuelve ("error", mensaje).
     """
     with app.app_context():
         try:
-            res = L.register_entry(placa, source="camara", vehicle_type=tipo)
+            estado, p = L.save_plate(placa, tipo)
         except Exception as e:  # base caída, bloqueada, mal configurada...
             db.session.rollback()
-            print(f"[BD] Error al registrar {placa}: {e}")
+            print(f"[BD] Error al guardar {placa}: {e}")
             return "error", "No se pudo guardar en la base de datos"
-        r = res["r"]
-        msg = res["msg"] + (f" Boleto {r.code}" if r and res["status"] in ("walkin", "checkin", "inside") else "")
-        return res["status"], msg
+        if estado == "invalid":
+            return "invalid", "Placa incompleta, no se guardó."
+        if estado == "new":
+            return "new", f"Placa {p.plate} guardada. Ya puede ingresar."
+        return "known", f"Placa {p.plate} ya estaba guardada."
