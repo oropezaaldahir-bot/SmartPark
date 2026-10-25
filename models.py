@@ -46,6 +46,20 @@ class Payment(db.Model):
     ref = db.Column(db.String(20))
 
 
+class Plate(db.Model):
+    """Placas que la cámara ya detectó y guardó. Solo estas (más reservas y empleados) pueden entrar por /acceso."""
+
+    __tablename__ = "placas"
+
+    id = db.Column(db.Integer, primary_key=True)
+    plate = db.Column(db.String(10), nullable=False)  # ABC-123
+    plate_norm = db.Column(db.String(10), nullable=False, unique=True)  # ABC123 (para comparar)
+    vehicle_type = db.Column(db.String(12))  # Automóvil | Motocicleta | Camión
+    first_seen = db.Column(db.DateTime, nullable=False)
+    last_seen = db.Column(db.DateTime, nullable=False)
+    hits = db.Column(db.Integer, nullable=False, default=1)  # veces que la cámara la detectó
+
+
 class Employee(db.Model):
     __tablename__ = "empleados"
 

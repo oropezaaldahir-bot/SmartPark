@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f2a4a" />
+    <title>Pasarela de pago (simulada)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='pasarela.css') }}" />
+    {% if state == 'done' %}<meta http-equiv="refresh" content="2;url={{ ret }}" />{% endif %}
+  </head>
+  <body>
+    <div class="sim" role="note">SIMULACIÓN · Esta pantalla imita una pasarela de pago. No se hace ningún cargo real.</div>
+    <header class="gw">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+      <b>Pago seguro</b>
+      <span>PasarelaDemo</span>
+    </header>
+    <main>
+      {% if state == 'none' %}
+      <section class="box">
+        <h1>No hay un pago pendiente</h1>
+        <p class="lead">Esta sesión de pago no existe o ya terminó.</p>
+        <a class="btn" href="{{ url_for('acceso') }}">Volver a SmartPark</a>
+      </section>
+
+      {% elif state == 'pay' %}
+      <section class="box sumry">
+        <div class="row"><span>Comercio</span><b>SmartPark</b></div>
+        <div class="row"><span>Concepto</span><b>{{ c.label }}</b></div>
+        <div class="amt"><small>Total a pagar</small><b>{{ amount }}</b></div>
+        <p class="exp">Esta sesión de pago vence a las {{ c.expires.strftime('%H:%M') }}.</p>
+      </section>
+      <form class="box" method="post" action="{{ url_for('pasarela.ver') }}" autocomplete="off" novalidate>
+        <h2>Pagar con tarjeta</h2>
+        <label for="cc">Número de tarjeta</label>
+        <input id="cc" name="cc" inputmode="numeric" autocomplete="off" placeholder="0000 0000 0000 0000" maxlength="23" autofocus />
+        <div class="g2">
+          <div><label for="exp">Vence (MM/AA)</label><input id="exp" name="exp" inputmode="numeric" autocomplete="off" placeholder="MM/AA" maxlength="5" /></div>
+          <div><label for="cvv">CVV</label><input id="cvv" name="cvv" type="password" inputmode="numeric" autocomplete="off" placeholder="123" maxlength="4" /></div>
+        </div>
+        <p class="msg" role="alert">{{ msg }}</p>
+        <button class="btn" type="submit" name="pagar" value="1">Pagar {{ amount }}</button>
+        <button class="btn ghost" type="submit" name="cancelar" value="1" formnovalidate>Cancelar y volver a SmartPark</button>
+        <p class="priv">SmartPark <b>no recibe ni guarda</b> los datos de tu tarjeta. Solo recibe la confirmación del pago y un folio.</p>
+        {% if demo %}<p class="demo">Tarjeta de prueba: <b>4242 4242 4242 4242</b>, cualquier fecha futura y cualquier CVV.</p>{% endif %}
+      </form>
+
+      {% else %}
+      <section class="box center" aria-live="polite">
+        <div class="okc" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 38 38" fill="none" stroke="#18a35f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20l8 8 14-16" /></svg></div>
+        <h2>Pago aprobado</h2>
+        <p class="lead">Folio <b class="mono">{{ folio }}</b></p>
+        <p class="lead">Regresando a SmartPark… <a href="{{ ret }}">continuar</a></p>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

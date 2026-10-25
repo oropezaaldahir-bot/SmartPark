@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <title>{% block title %}SmartPark{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='comun.css') }}" />
+    {% block css %}{% endblock %}
+    {% block head %}{% endblock %}
+  </head>
+  <body{% if tab %} data-tab="{{ tab }}"{% endif %}>
+    {% block header %}
+    <header>
+      <div class="lg" aria-hidden="true">{{ LOGO|safe }}</div>
+      <div class="brand"><b>SMART</b><span>PARK</span></div>
+      <small>{{ sub }}</small>
+    </header>
+    {% endblock %}
+
+    {% block body %}{% endblock %}
+
+    {% if tab %}
+    <nav class="tabbar" aria-label="Navegación">
+      {% for id, ep, label, icon in TABS %}
+      <a class="tab" href="{{ url_for(ep) }}"{% if id == tab %} aria-current="page"{% endif %}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg>{{ label }}
+      </a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+
+    <div id="toasts" role="status" aria-live="polite">
+      {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="toast {{ cat }}">{{ msg }}</div>{% endfor %}
+    </div>
+  </body>
+</html>

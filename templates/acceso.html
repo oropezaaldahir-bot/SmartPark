@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% set tab = "entrada" %}{% set sub = "ACCESO" %}
+{% block title %}SmartPark · Acceso inteligente{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='acceso.css') }}" />{% endblock %}
+{% block body %}
+<main class="wrap center">
+  <div class="card glow">
+    <h1>Ingresa placas</h1>
+    <p class="lead">Introduce la matrícula para registrar la entrada</p>
+    <p class="free-pill{{ '' if free else ' none' }}">{{ free ~ ' de 48 cajones libres' if free else 'Estacionamiento lleno' }}</p>
+    <form method="post" action="{{ url_for('acceso') }}" autocomplete="off">
+      <div class="plate{{ ' err' if err }}">
+        <div class="pt"><span>MÉXICO</span><i>SMARTPARK</i><span>2026</span></div>
+        <input name="placa" value="{{ plate }}" type="text" maxlength="10" autofocus autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="ABC-123" aria-label="Placa del vehículo" />
+        <div class="pb">REGISTRO DE VEHÍCULO</div>
+      </div>
+      <p class="msg" role="alert">{{ err }}</p>
+      <button class="btn block" type="submit">
+        Ingresar
+        <svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h20M16 6l8 8-8 8" /></svg>
+      </button>
+    </form>
+  </div>
+  <a class="back" href="{{ url_for('admin.login') }}">Acceso del personal</a>
+</main>
+{% endblock %}

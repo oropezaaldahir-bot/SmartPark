@@ -45,5 +45,3 @@ AREAS = [
     {"id": "F", "n": "Área F", "c": "#ec4899"},
 ]
 
-# Entradas de ejemplo por día (L..D) para la gráfica; se les suma lo de hoy.
-HIST_BASE = [38, 24, 41, 22, 35, 47, 52]

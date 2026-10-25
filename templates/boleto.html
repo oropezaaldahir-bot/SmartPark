@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set tab = "boleto" %}{% set sub = "BOLETO" %}
+{% block title %}SmartPark · Boleto{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='boleto.css') }}" />{% endblock %}
+{% block head %}{% if r %}<meta http-equiv="refresh" content="30" />{% endif %}{% endblock %}
+{% block body %}
+<main class="wrap">
+  {% if not r %}
+  <section class="empty">
+    <h1>Sin boleto</h1>
+    <p class="lead">No encontramos una entrada registrada. Ingresa tu placa para generar tu boleto.</p>
+    <a class="btn block" href="{{ url_for('acceso') }}">Ir a registrar placa</a>
+  </section>
+  {% else %}
+  <section>
+    <div class="okc" aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 38 38" fill="none" stroke="#3ddc97" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20l8 8 14-16" /></svg>
+    </div>
+    <h1>{{ title }}</h1>
+    <p class="lead">{{ sub }}</p>
+
+    <div class="tk">
+      <div class="tkh">
+        <div><small>BOLETO #</small><b class="mono">{{ r.code }}</b></div>
+        <span class="pill {{ pill[1] }}">{{ pill[0] }}</span>
+      </div>
+      <div class="hr"></div>
+      <div class="g2">
+        <div class="bx"><small>Placa registrada{% if emp %}<span class="tag">EMPLEADO</span>{% endif %}</small><b>{{ fmt_plate(r.plate) }}</b></div>
+        <div class="bx cj"><small>Cajón asignado</small><b>{{ spot_lbl }}</b><em>Área {{ r.spot[0] }} · Nivel 1</em></div>
+      </div>
+      <div class="bx"><small>Hora de entrada</small><b>{{ entry }}</b></div>
+      <div class="g2 g2b">
+        <div class="bx"><small>Tiempo dentro</small><b>{{ dur }}</b></div>
+        <div class="bx tot{{ ' paid' if show_paid }}">
+          <small>{{ 'Total pagado' if show_paid else ('Por pagar' if paid > 0 else 'Total a pagar') }}</small>
+          <b>${{ paid if show_paid else due }}</b>
+        </div>
+      </div>
+      <div class="tear"></div>
+      <div class="barcode">{{ barcode|safe }}</div>
+      <div class="barnum mono">{{ r.code }}</div>
+      <div class="tear t2"></div>
+      <a class="btn block dl" href="{{ url_for('boleto_png', code=r.code) }}" download>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></svg>
+        Descargar ticket
+      </a>
+    </div>
+
+    <div class="card pay{{ ' ok' if done or settled }}">
+      {% if done %}
+        <h2>Salida registrada</h2>
+        <p class="sub">Pagaste <b>{{ money(paid) }}</b>. ¡Gracias por visitarnos!</p>
+        <a class="btn ghost block" href="{{ url_for('boleto_png', code=r.code) }}" download>Descargar recibo</a>
+      {% elif due > 0 %}
+        <h2>Pagar estacionamiento</h2>
+        <div class="amt">${{ due }}<small> MXN</small></div>
+        <p class="sub">Tarifa ${{ RATE }}/h · se cobra por hora iniciada{% if paid > 0 %} · ya pagaste {{ money(paid) }}{% endif %}</p>
+        <form method="post" action="{{ url_for('boleto_pagar', code=r.code) }}">
+          <button class="btn block" type="submit">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            Pagar en línea
+          </button>
+        </form>
+        <p class="note">Te llevaremos a una pasarela de pago segura. SmartPark no guarda tus datos de tarjeta.<br />¿Prefieres efectivo? Paga en la caseta mostrando este boleto.</p>
+      {% else %}
+        <h2 class="stamp">✓ Pago registrado</h2>
+        <p class="sub">Pagaste <b>{{ money(paid) }}</b>{% if until %}. Tienes hasta las <b>{{ hhmm(until) }}</b> para salir sin cargo extra.{% else %}.{% endif %}</p>
+        <a class="btn ghost block" href="{{ url_for('boleto_png', code=r.code) }}" download>Descargar recibo</a>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

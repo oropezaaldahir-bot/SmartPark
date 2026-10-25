@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}SmartPark · Administrador{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='administrador.css') }}" />{% endblock %}
+{% block header %}
+<header>
+  <div class="lg" aria-hidden="true">{{ LOGO|safe }}</div>
+  <div class="brand"><b>SMART</b><span>PARK</span></div>
+  <small class="role">ADMIN</small>
+  <a class="lo" href="{{ url_for('admin.confirm', action='salir') }}" aria-label="Cerrar sesión">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+    <span>Salir</span>
+  </a>
+</header>
+<nav class="sub" aria-label="Secciones">
+  <a href="#resumen" aria-current="true">Resumen</a><a href="#cajones">Cajones</a><a href="#reservas">Reservas</a><a href="#empleados">Empleados</a>
+  <a href="{{ url_for('admin.panel') }}" class="refresh">↻ Actualizar</a>
+</nav>
+{% endblock %}
+
+{% block body %}
+<main class="wrap admin">
+  <section id="resumen">
+    <div class="kpis">
+      {% for label, value, cls in kpis %}<div class="kpi {{ cls }}"><b>{{ value }}</b>{{ label }}</div>{% endfor %}
+    </div>
+    <div class="card chart">
+      <h2>Entradas por día (últimos 7 días)</h2>
+      <svg viewBox="0 0 400 200" role="img" aria-label="Entradas por día, últimos 7 días">{{ chart }}</svg>
+    </div>
+  </section>
+
+  <form id="cajones" class="two" method="get" action="{{ url_for('admin.panel') }}#cajones" autocomplete="off">
+    <div class="card">
+      <h2>Mapa de cajones</h2>
+      <div class="areas">
+        {% for a in AREAS %}
+        <button type="submit" name="area" value="{{ a.id }}" class="area" aria-pressed="{{ 'true' if a.id == area else 'false' }}" aria-label="{{ a.n }}, {{ free[a.id] }} libres">
+          <span class="sw" style="background: {{ a.c }}"></span>{{ a.id }}<small>{{ free[a.id] }}</small>
+        </button>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="sel" value="{{ spot or '' }}" />
+      <input type="hidden" name="area_cur" value="{{ area }}" />
+      <div class="map">
+        <div class="spots">
+          {% for g in grid %}
+            {% if loop.index == 5 %}<div class="lane">→ entrada</div>{% endif %}
+            {% if g.can %}
+            <button class="spot {{ g.state }}" type="submit" name="spot" value="{{ g.id }}" aria-label="Cajón {{ g.id }}, {{ g.label }}">
+              <i style="background: {{ AREAS|selectattr('id', 'equalto', area)|first|attr('c') }}"></i><b>{{ g.id }}</b><small>{{ 'Elegido' if g.state == 'sel' else g.label }}</small>
+            </button>
+            {% else %}
+            <div class="spot {{ g.state }}"><i style="background: {{ AREAS|selectattr('id', 'equalto', area)|first|attr('c') }}"></i><b>{{ g.id }}</b><small>{{ g.label }}</small></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="free"></i>Libre</span><span><i class="resv"></i>Reservado</span>
+        <span><i class="busy"></i>Ocupado</span><span><i class="sel"></i>Seleccionado</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Reservar cajón</h2>
+      <p class="hintline">Toca un cajón libre en el mapa para elegirlo.</p>
+      <div class="chosen{{ ' on' if spot }}">{{ 'Cajón ' ~ spot if spot else 'Ningún cajón seleccionado' }}</div>
+      <label for="resPlate">Placa del vehículo</label>
+      <input id="resPlate" name="placa" class="fld" maxlength="10" value="{{ plate }}" placeholder="ABC-123" style="text-transform: uppercase" />
+      {% if spot and plate|length >= 5 %}
+      <button class="btn block" type="submit" formaction="{{ url_for('admin.confirm', action='reservar') }}">Cobrar {{ money(fee.amount) }} y reservar</button>
+      {% else %}
+      <button class="btn block" type="submit" name="act" value="1">{{ 'Elige un cajón y escribe la placa' if not spot else 'Escribe la placa y presiona aquí' }}</button>
+      {% endif %}
+      <p class="note">El cliente tendrá 15 min para llegar. Tarifa de reservación ahora: {{ money(fee.amount) }} ({{ fee.label }}).</p>
+    </div>
+  </form>
+
+  <section id="reservas">
+    <div class="card">
+      <div class="bar-top">
+        <h2>Reservas activas</h2>
+        <form class="search" method="get" action="{{ url_for('admin.panel') }}#reservas" role="search">
+          <label for="q" class="sr">Buscar por placa, cajón o código</label>
+          <input id="q" name="q" class="fld" type="search" value="{{ q }}" placeholder="Buscar placa, cajón o código" autocomplete="off" />
+        </form>
+      </div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Cajón</th><th>Placa</th><th>Estado</th><th>Hora</th><th>Tiempo</th><th>Cobro</th><th></th></tr></thead>
+          <tbody>
+          {% for x in rows %}
+            <tr>
+              <td><b>{{ x.r.spot }}</b></td>
+              <td class="mono">{{ x.r.plate }}{% if x.emp %} <span class="tag emp">Empleado</span>{% endif %}{% if x.r.source == 'camara' %} <span class="tag busy">Cámara</span>{% endif %}{% if x.r.vehicle_type %}<br /><small style="color: var(--mute)">{{ x.r.vehicle_type }}</small>{% endif %}</td>
+              <td><span class="tag {{ 'busy' if x.inn else 'resv' }}">{{ 'Ocupado' if x.inn else 'Reservado' }}</span></td>
+              <td>{{ x.hora }}</td>
+              <td>{{ x.dur }}</td>
+              <td>{% if x.inn %}{% if x.due > 0 %}<span class="tag bad">${{ x.due }} por cobrar</span>{% else %}<span class="tag ok">Pagado</span>{% endif %}{% else %}—{% endif %}</td>
+              <td class="act">
+                {% if x.inn %}
+                <a class="btn sm{{ '' if x.due > 0 else ' ghost' }}" href="{{ url_for('admin.confirm', action='out', code=x.r.code) }}">{{ 'Cobrar y salir' if x.due > 0 else 'Registrar salida' }}</a>
+                {% else %}
+                <a class="btn sm" href="{{ url_for('admin.confirm', action='checkin', code=x.r.code) }}">Check-in</a>
+                <a class="btn sm ghost" href="{{ url_for('admin.confirm', action='cancel', code=x.r.code) }}">Cancelar</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="empty">{{ 'Sin resultados para esa búsqueda.' if q else 'No hay reservas activas.' }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="empleados">
+    <div class="card">
+      <h2>Placas de empleados</h2>
+      <form class="emp-form" method="post" action="{{ url_for('admin.emp_add') }}" autocomplete="off">
+        <div><label for="empName">Nombre</label><input id="empName" name="nombre" class="fld" maxlength="40" /></div>
+        <div><label for="empPlate">Placa</label><input id="empPlate" name="placa" class="fld" maxlength="10" placeholder="ABC-123" style="text-transform: uppercase" /></div>
+        <button class="btn" type="submit">Registrar empleado</button>
+      </form>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Nombre</th><th>Placa</th><th></th></tr></thead>
+          <tbody>
+          {% for e in emps %}
+            <tr><td>{{ e.name }}</td><td class="mono">{{ e.plate }}</td>
+                <td class="act"><a class="btn sm ghost" href="{{ url_for('admin.confirm', action='empdel', id=e.id) }}">Quitar</a></td></tr>
+          {% else %}
+            <tr><td colspan="3" class="empty">Aún no hay empleados registrados.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

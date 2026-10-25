@@ -5,8 +5,8 @@ import random
 import re
 from datetime import datetime, timedelta
 
-from config import AREAS, HIST_BASE, HOLD, RATE, SPOTS_PER_AREA, TOL, TZ
-from models import Employee, Payment, Reservation, db
+from config import AREAS, HOLD, RATE, SPOTS_PER_AREA, TOL, TZ
+from models import Employee, Payment, Plate, Reservation, db
 
 HOUR = timedelta(hours=1)
 DEAD = ("cancelled", "expired", "done")
@@ -57,6 +57,37 @@ def fmt_plate(p):
 def is_emp(plate):
     """Única definición: compara sin importar espacios o guiones."""
     return Employee.query.filter_by(plate_norm=norm(plate)).first() is not None
+
+
+# ---------------------------------------------------------------- placas guardadas (base de la cámara)
+def save_plate(plate_input, vehicle_type=None):
+    """La cámara guarda aquí cada placa que lee. Devuelve (estado, Plate):
+    invalid | new (primera vez) | known (ya estaba; solo se actualiza la última vez vista)."""
+    raw = norm(plate_input)[:7]
+    if len(raw) < 5:
+        return "invalid", None
+    n = now()
+    p = Plate.query.filter_by(plate_norm=raw).first()
+    if p:
+        p.last_seen, p.hits = n, (p.hits or 0) + 1
+        if vehicle_type and not p.vehicle_type:
+            p.vehicle_type = vehicle_type
+        db.session.commit()
+        return "known", p
+    p = Plate(plate=fmt_plate(raw), plate_norm=raw, vehicle_type=vehicle_type, first_seen=n, last_seen=n)
+    db.session.add(p)
+    db.session.commit()
+    return "new", p
+
+
+def plate_known(plate_input):
+    """¿Esta placa está en la base? Sí si la cámara la guardó, si es de un empleado
+    o si ya tiene una reserva vigente (la pagó al reservar)."""
+    raw = norm(plate_input)[:7]
+    if Plate.query.filter_by(plate_norm=raw).first() or is_emp(raw):
+        return True
+    cand = Reservation.query.filter(Reservation.status.in_(["in", "reserved"])).all()
+    return any(is_active(x) and norm(x.plate) == raw for x in cand)
 
 
 # ---------------------------------------------------------------- cajones
@@ -137,16 +168,21 @@ def new_code():
 
 
 # ---------------------------------------------------------------- registro de entrada
-def register_entry(plate_input, source="web", vehicle_type=None):
+def register_entry(plate_input, source="web", vehicle_type=None, only_known=False):
     """Registra la entrada de una placa. La usan la página web (/acceso) y la cámara,
     así las dos aplican EXACTAMENTE las mismas reglas.
 
     Devuelve {"status", "r", "msg"} con status:
       invalid | inside (ya estaba dentro) | early (reserva muy temprano)
-      checkin (reserva confirmada) | walkin (entrada nueva) | full (sin lugar)"""
+      checkin (reserva confirmada) | walkin (entrada nueva) | full (sin lugar)
+      unknown (solo con only_known=True: la placa no está en la base)"""
     raw = norm(plate_input)[:7]
     if len(raw) < 5:
         return {"status": "invalid", "r": None, "msg": "Escribe la placa completa (mínimo 5 caracteres)."}
+
+    if only_known and not plate_known(raw):
+        return {"status": "unknown", "r": None,
+                "msg": "Placa no registrada. Solo pueden entrar las placas que la cámara ya detectó."}
 
     cand = Reservation.query.filter(Reservation.status.in_(["in", "reserved"])).all()
     r = next((x for x in cand if is_active(x) and norm(x.plate) == raw), None)
@@ -343,12 +379,25 @@ def today_start():
     return datetime(n.year, n.month, n.day)
 
 
-def chart_svg():
+def entries_by_day(days=7):
+    """Entradas reales por día: cuenta los vehículos que entraron (checkin) en cada uno de los
+    últimos `days` días, terminando hoy. Devuelve [(fecha, cantidad), ...] del más viejo a hoy."""
     t0 = today_start()
-    hoy = Reservation.query.filter(Reservation.checkin >= t0).count()
-    h = list(HIST_BASE)
-    idx = now().weekday()
-    h[idx] += hoy
+    first = t0 - timedelta(days=days - 1)
+    counts = {first + timedelta(days=i): 0 for i in range(days)}
+    for (ck,) in db.session.query(Reservation.checkin).filter(Reservation.checkin >= first).all():
+        d = datetime(ck.year, ck.month, ck.day)
+        if d in counts:
+            counts[d] += 1
+    return sorted(counts.items())
+
+
+def chart_svg():
+    data = entries_by_day(7)
+    h = [c for _, c in data]
+    idx = len(h) - 1  # hoy es la última barra
+    DIAS = ["L", "M", "M", "J", "V", "S", "D"]
+    dias = [DIAS[d.weekday()] for d, _ in data]
     top = math.ceil((max(h) + 1) / 10) * 10
     x0, y0, ph, pw, bw = 46, 170, 140, 340, 30
     st = pw / 7
@@ -365,7 +414,7 @@ def chart_svg():
         x = x0 + st * i + (st - bw) / 2
         s.append(
             f'<rect class="bar{" today" if i == idx else ""}" x="{x:.1f}" y="{y0 - bh:.1f}" width="{bw}" '
-            f'height="{bh:.1f}" rx="3"><title>{v} entradas</title></rect>'
+            f'height="{bh:.1f}" rx="3"><title>{data[i][0]:%d/%m}: {v} entradas</title></rect>'
             f'<text class="bv" x="{x + bw / 2:.1f}" y="{y0 - bh - 4:.1f}">{v}</text>'
             f'<text class="ax" style="font-size:13px;font-weight:{700 if i == idx else 400}" '
             f'x="{x + bw / 2:.1f}" y="190" text-anchor="middle">{dias[i]}</text>'

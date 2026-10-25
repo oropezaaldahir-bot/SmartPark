@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% set tab = "reservar" %}{% set sub = "RESERVAS" %}
+{% block title %}SmartPark · Reservaciones{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='reservaciones.css') }}" />{% endblock %}
+{% block head %}{% if mode == 'ticket' %}<meta http-equiv="refresh" content="20" />{% endif %}{% endblock %}
+
+{% macro spots(grid, interactive) %}
+<div class="spots">
+  {% for g in grid %}
+    {% if loop.index == 5 %}<div class="lane">→ entrada</div>{% endif %}
+    {% if interactive and g.can %}
+    <button class="spot {{ g.state }}" type="submit" name="spot" value="{{ g.id }}" aria-label="Cajón {{ g.id }}, {{ g.label }}">
+      <i style="background: {{ area_obj.c }}"></i><b>{{ g.id }}</b><small>{{ g.label }}</small>
+    </button>
+    {% else %}
+    <div class="spot {{ g.state }}">
+      <i style="background: {{ (area_obj or a).c }}"></i><b>{{ g.id }}</b><small>{{ g.label }}</small>
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% block body %}
+<main class="wrap wide">
+{% if mode == 'form' %}
+  <form method="get" action="{{ url_for('reservar') }}" class="rsv" autocomplete="off">
+    <ol class="steps" aria-label="Progreso">
+      {% for label in ['Datos', 'Área', 'Cajón'] %}
+      <li class="{{ 'done' if s.steps[loop.index0] else ('now' if loop.index0 == cur else '') }}"><b>{{ '✓' if s.steps[loop.index0] else loop.index }}</b>{{ label }}</li>
+      {% endfor %}
+    </ol>
+
+    <div class="f card">
+      <label for="plate">Placa del vehículo</label>
+      <input class="fld" id="plate" name="placa" value="{{ s.plate }}" maxlength="10" placeholder="ABC-123" autocapitalize="characters" style="text-transform: uppercase" />
+      <div class="g2">
+        <div><label for="date">Día</label><input class="fld" id="date" name="fecha" type="date" value="{{ s.date }}" min="{{ today }}" /></div>
+        <div><label for="time">Hora de llegada</label><input class="fld" id="time" name="hora" type="time" step="900" value="{{ s.time }}" /></div>
+      </div>
+      <button class="btn ghost sm upd" type="submit" name="act" value="1">Actualizar tarifa</button>
+    </div>
+
+    <div class="m card">
+      <h2>Elige tu área</h2>
+      <div class="areas">
+        {% for a in AREAS %}
+        <button type="submit" name="area" value="{{ a.id }}" class="area" aria-pressed="{{ 'true' if a.id == s.area else 'false' }}" aria-label="{{ a.n }}, {{ free[a.id] }} libres">
+          <span class="sw" style="background: {{ a.c }}"></span>{{ a.id }}<small>{{ free[a.id] }} libres</small>
+        </button>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="sel" value="{{ s.spot or '' }}" />
+      <input type="hidden" name="area_cur" value="{{ s.area or '' }}" />
+      {% if not s.area %}
+        <div class="hint">Primero elige un área para ver sus cajones.</div>
+      {% else %}
+        <div class="map">
+          <h2>Elige tu cajón <span>· {{ area_obj.n }}, Nivel 1</span></h2>
+          {{ spots(grid, true) }}
+          <div class="legend">
+            <span><i class="free"></i>Libre</span><span><i class="resv"></i>Reservado</span>
+            <span><i class="busy"></i>Ocupado</span><span><i class="sel"></i>Tu cajón</span>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="b">
+      <div class="sum">
+        <div>Tu cajón<br /><b>{{ s.spot or 'ninguno' }}</b></div>
+        <div style="text-align: right">Tarifa de reservación<br /><b>{{ money(fee.amount) if fee else '—' }}</b></div>
+      </div>
+      <p class="feewhy">{% if fee %}{{ fee.label }} · {{ day_label(s.start) }}, {{ hhmm(s.start) }}{% else %}Elige día y hora de llegada{% endif %}</p>
+      <p class="msg{{ ' dim' if error.startswith('Falta') or error.startswith('Todo') else '' }}" role="status">{{ error }}</p>
+      <button class="btn block" type="submit" formmethod="post" formaction="{{ url_for('reservar') }}">Ir a pagar{% if fee %} {{ money(fee.amount) }}{% endif %}</button>
+      <p class="note">La tarifa de reservación se paga ahora en una pasarela de pago segura (SmartPark no guarda tus datos de tarjeta) y depende del día y la hora de llegada. Ya dentro, se cobra además ${{ RATE }} MXN por hora estacionada. Tendrás 15 minutos de tolerancia; la tarifa de reservación no es reembolsable.</p>
+    </div>
+  </form>
+
+{% else %}
+  <section class="rsv2">
+    <div class="ticket card">
+      <div class="top" style="background: {{ a.c }}">
+        <small>{{ a.n }} · tu cajón</small>
+        <div class="big">{{ r.spot }}</div>
+        <small>Nivel 1</small>
+      </div>
+      <div class="stat {{ cls }}" aria-live="polite">{{ txt }}</div>
+      <div class="rows">
+        <div class="row"><span>Código</span><b class="mono">{{ r.code }}</b></div>
+        <div class="row"><span>Placa</span><b class="mono">{{ r.plate }}</b></div>
+        <div class="row"><span>Llegada</span><b>{{ day_label(r.start) }}, {{ hhmm(r.start) }}</b></div>
+        <div class="row"><span>Reservación</span><b>{% if r.fee_amount %}{{ money(r.fee_amount) }} · pagada{% else %}—{% endif %}</b></div>
+        <div class="row">
+          <span>{{ ('Por pagar' if due > 0 else 'Pagado') if inside else ('Total pagado' if r.status == 'done' else 'Tarifa') }}</span>
+          <b>{{ (money(due) if due > 0 else money(paid)) if inside else (money(paid) if r.status == 'done' else money(RATE) ~ ' / hora') }}</b>
+        </div>
+      </div>
+      <p class="note" style="padding: 0 18px 16px">Al llegar, registra tu placa en el <a href="{{ url_for('acceso') }}">acceso</a> para confirmar tu entrada.</p>
+    </div>
+
+    <div class="card map2">
+      <h2>Dónde está tu cajón</h2>
+      <div class="map">{{ spots(grid, false) }}</div>
+    </div>
+
+    <div class="acts">
+      {% if inside %}<a class="btn block" href="{{ url_for('boleto', code=r.code) }}">{{ 'Pagar ' ~ money(due) if due > 0 else 'Ver boleto y recibo' }}</a>{% endif %}
+      {% if not dead and not (inside and due > 0) %}
+      <form method="post" action="{{ url_for('reservar_cancelar') }}"><button class="btn ghost block" type="submit">{{ 'Registrar salida' if inside else 'Cancelar reserva' }}</button></form>
+      {% endif %}
+      {% if dead %}
+      <form method="post" action="{{ url_for('reservar_nueva') }}"><button class="btn block" type="submit">Hacer una nueva reserva</button></form>
+      {% endif %}
+    </div>
+  </section>
+{% endif %}
+</main>
+{% endblock %}
