@@ -1,10 +1,15 @@
 """Módulo principal: orquesta cámara, OCR, interfaz y clasificación de placas.
 
-Flujo:  ESPACIO -> detecta y lee la placa  |  ENTER -> la guarda en la base de datos
-        q / ESC -> salir
-(Se pide confirmar con ENTER para no guardar una lectura equivocada del OCR.)
+Se corre una vez por cámara (dos ventanas, dos terminales):
+
+    python main.py entrada   ESPACIO = detecta la placa | ENTER = la GUARDA en la base de datos
+    python main.py salida    ESPACIO = detecta la placa y busca su tarifa
+                             ENTER   = deja salir SOLO si ya pagó; registra la salida y borra la placa
+
+q / ESC -> salir. Se pide confirmar con ENTER para no usar una lectura equivocada del OCR.
 """
 import os
+import sys
 
 from modulos import camara
 from modulos import ocr
@@ -14,19 +19,28 @@ from modulos import detector_placa
 from modulos import registro
 from modulos.placas import extraer_placa
 
-# Índice de la cámara: 0 = la de la computadora, 1 = externa. Cámbialo sin tocar el código:
-#   (Windows)  set CAMARA_INDICE=0 && python main.py
-CAMARA_INDICE = int(os.getenv("CAMARA_INDICE", "1"))
+# Índice de cada cámara: 0 = la de la computadora, 1 = externa, etc. Cámbialos sin tocar el código:
+#   (Windows)  set CAMARA_ENTRADA=0 && set CAMARA_SALIDA=1 && python main.py entrada
+CAMARA_ENTRADA = int(os.getenv("CAMARA_ENTRADA", os.getenv("CAMARA_INDICE", "0")))
+CAMARA_SALIDA = int(os.getenv("CAMARA_SALIDA", "1"))
+
+MODOS = {
+    "entrada": dict(titulo="Camara de ENTRADA", ayuda="ESPACIO=detectar  ENTER=guardar placa  Q=salir"),
+    "salida": dict(titulo="Camara de SALIDA", ayuda="ESPACIO=detectar y cobrar  ENTER=dejar salir  Q=salir"),
+}
 
 
-def main():
+def main(modo="entrada"):
+    if modo not in MODOS:
+        raise SystemExit("Uso: python main.py entrada | salida")
+    cfg = MODOS[modo]
     ocr.iniciar_ocr()
-    cap = camara.abrir_camara(indice=CAMARA_INDICE)
+    cap = camara.abrir_camara(indice=CAMARA_ENTRADA if modo == "entrada" else CAMARA_SALIDA)
 
     mensaje = ""     # lo que se muestra en pantalla (placa reconocida)
-    estado = ""      # resultado del registro en la base de datos
+    estado = ""      # resultado en la base de datos
     pendiente = None  # (placa, tipo) leída y esperando ENTER
-    print("ESPACIO -> detectar placa | ENTER -> guardar placa | q / ESC -> salir")
+    print(f"[{modo.upper()}] {cfg['ayuda']}")
 
     while True:
         ret, frame = camara.leer_frame(cap)
@@ -35,7 +49,7 @@ def main():
         # Localiza la placa automáticamente en cada frame (modelo YOLO entrenado)
         zona = detector_placa.detectar_zona_placa(frame)
 
-        interfaz.dibujar_frame(frame, mensaje, zona, estado=estado)
+        interfaz.dibujar_frame(frame, mensaje, zona, titulo=cfg["titulo"], estado=estado, ayuda=cfg["ayuda"])
         tecla = interfaz.leer_tecla()
 
         if interfaz.es_detectar(tecla):
@@ -55,8 +69,12 @@ def main():
             if placa:
                 mensaje = f"{placa} - {tipo}"
                 pendiente = (placa, tipo)
-                estado = "ENTER = guardar placa"
                 print(f"Placa: {placa} | Tipo: {tipo}")
+                if modo == "entrada":
+                    estado = "ENTER = guardar placa"
+                else:  # busca la tarifa de esa placa
+                    _, estado = registro.consultar_salida(placa)
+                    print("Tarifa:", estado)
             else:
                 mensaje = "Placa no reconocida"
                 print("No se reconoció una placa válida en el texto")
@@ -64,17 +82,22 @@ def main():
         elif interfaz.es_confirmar(tecla):
             if pendiente is None:
                 estado = "Primero detecta una placa (ESPACIO)"
-            else:
+            elif modo == "entrada":
                 _, estado = registro.registrar_placa(*pendiente)
                 print("Registro:", estado)
                 pendiente = None
+            else:
+                res, estado = registro.registrar_salida(pendiente[0])
+                print("Salida:", estado)
+                if res != "pay":  # si debe pagar, ENTER de nuevo cuando ya pagó
+                    pendiente = None
 
         elif interfaz.es_salir(tecla):
             break
 
     camara.cerrar_camara(cap)
-    print("Último texto guardado:", ocr.obtener_texto())
+    print("Último texto leído:", ocr.obtener_texto())
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "entrada")
