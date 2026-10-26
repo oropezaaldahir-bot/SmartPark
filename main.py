@@ -1,103 +1,140 @@
-"""Módulo principal: orquesta cámara, OCR, interfaz y clasificación de placas.
+"""Módulo principal: DOS cámaras simultáneas (entrada y salida) en un solo programa.
 
-Se corre una vez por cámara (dos ventanas, dos terminales):
+    python main.py             # las dos cámaras a la vez (cada una en su ventana)
+    python main.py entrada     # solo la de entrada
+    python main.py salida      # solo la de salida
 
-    python main.py entrada   ESPACIO = detecta la placa | ENTER = la GUARDA en la base de datos
-    python main.py salida    ESPACIO = detecta la placa y busca su tarifa
-                             ENTER   = deja salir SOLO si ya pagó; registra la salida y borra la placa
-
-q / ESC -> salir. Se pide confirmar con ENTER para no usar una lectura equivocada del OCR.
+Teclas:  ESPACIO -> OCR en las cámaras abiertas (lee la placa; en la de salida también busca la tarifa)
+         E       -> cámara de ENTRADA: guarda la placa en la base de datos
+         S       -> cámara de SALIDA: deja salir SOLO si ya pagó; registra la salida y borra la placa
+         q / ESC -> salir
+(Se confirma con E / S para no usar una lectura equivocada del OCR.)
 """
 import os
 import sys
 
-from modulos import camara
-from modulos import ocr
-from modulos import interfaz
-from modulos import zona_placa
-from modulos import detector_placa
-from modulos import registro
+import cv2
+
+from modulos import camara, ocr, interfaz, zona_placa, detector_placa, registro
 from modulos.placas import extraer_placa
 
-# Índice de cada cámara: 0 = la de la computadora, 1 = externa, etc. Cámbialos sin tocar el código:
-#   (Windows)  set CAMARA_ENTRADA=0 && set CAMARA_SALIDA=1 && python main.py entrada
-CAMARA_ENTRADA = int(os.getenv("CAMARA_ENTRADA", os.getenv("CAMARA_INDICE", "0")))
-CAMARA_SALIDA = int(os.getenv("CAMARA_SALIDA", "1"))
-
-MODOS = {
-    "entrada": dict(titulo="Camara de ENTRADA", ayuda="ESPACIO=detectar  ENTER=guardar placa  Q=salir"),
-    "salida": dict(titulo="Camara de SALIDA", ayuda="ESPACIO=detectar y cobrar  ENTER=dejar salir  Q=salir"),
+# Índice USB de cada cámara (0, 1, 2...). Cámbialos sin tocar el código:
+#   (Windows)  set CAMARA_ENTRADA=0 && set CAMARA_SALIDA=1 && python main.py
+#   (PowerShell)  $env:CAMARA_ENTRADA="0"; $env:CAMARA_SALIDA="1"
+INDICES = {
+    "entrada": int(os.getenv("CAMARA_ENTRADA", "0")),
+    "salida": int(os.getenv("CAMARA_SALIDA", "1")),
 }
+AYUDA = {
+    "entrada": "ESPACIO=detectar  E=guardar placa  Q=salir",
+    "salida": "ESPACIO=detectar y cobrar  S=dejar salir  Q=salir",
+}
+TITULO = {"entrada": "Camara de ENTRADA", "salida": "Camara de SALIDA"}
 
 
-def main(modo="entrada"):
-    if modo not in MODOS:
-        raise SystemExit("Uso: python main.py entrada | salida")
-    cfg = MODOS[modo]
+def procesar_ocr(frame, zona, nombre):
+    """OCR sobre la zona de la placa. Devuelve (texto a mostrar, (placa, tipo) o None)."""
+    recorte = zona_placa.recortar_zona(frame, zona)
+    if recorte is None:
+        print(f"[{nombre}] No se encontró zona de placa")
+        return "Sin zona de placa", None
+
+    ocr.detectar_texto(recorte)  # OCR solo dentro de la zona
+    texto = ocr.obtener_texto()
+    print(f"[{nombre}] Texto detectado:", texto)
+
+    placa, tipo = extraer_placa(texto)  # elige del texto la parte que realmente es una placa
+    if placa:
+        print(f"[{nombre}] Placa: {placa} | Tipo: {tipo}")
+        return f"{placa} - {tipo}", (placa, tipo)
+    print(f"[{nombre}] No se reconoció una placa válida")
+    return "Placa no reconocida", None
+
+
+def main(modos=("entrada", "salida")):
     ocr.iniciar_ocr()
-    cap = camara.abrir_camara(indice=CAMARA_ENTRADA if modo == "entrada" else CAMARA_SALIDA)
+    detector_placa.cargar_modelo()
 
-    mensaje = ""     # lo que se muestra en pantalla (placa reconocida)
-    estado = ""      # resultado en la base de datos
-    pendiente = None  # (placa, tipo) leída y esperando ENTER
-    print(f"[{modo.upper()}] {cfg['ayuda']}")
+    # Abre cada cámara en su propio hilo (siempre guarda el frame más reciente)
+    cams = {}
+    try:
+        for modo in modos:
+            try:
+                cams[modo] = camara.CamaraHilo(INDICES[modo])
+            except RuntimeError:
+                print(f"[{modo.upper()}] No se pudo abrir la cámara con índice {INDICES[modo]}. "
+                      f"Revisa el puerto USB o cambia CAMARA_{modo.upper()}.")
+        if not cams:
+            return
+    except BaseException:
+        for c in cams.values():
+            c.cerrar()
+        raise
 
-    while True:
-        ret, frame = camara.leer_frame(cap)
-        if not ret:
-            break
-        # Localiza la placa automáticamente en cada frame (modelo YOLO entrenado)
-        zona = detector_placa.detectar_zona_placa(frame)
+    # Estado de cada cámara: lo que muestra, el resultado en la base y la placa esperando confirmación
+    mensajes = {m: "" for m in cams}
+    estados = {m: "" for m in cams}
+    pendientes = {m: None for m in cams}
+    print("ESPACIO -> OCR | E -> guardar placa (entrada) | S -> dejar salir (salida) | q / ESC -> salir")
 
-        interfaz.dibujar_frame(frame, mensaje, zona, titulo=cfg["titulo"], estado=estado, ayuda=cfg["ayuda"])
-        tecla = interfaz.leer_tecla()
+    try:
+        while True:
+            frames, zonas = {}, {}
+            for modo, cam in cams.items():
+                ret, frame = cam.leer()
+                frames[modo] = frame if ret else None
+                if not ret:
+                    zonas[modo] = None
+                    continue
+                zonas[modo] = detector_placa.detectar_zona_placa(frame)  # YOLO en cada frame
+                interfaz.dibujar_frame(frame, mensajes[modo], zonas[modo], titulo=TITULO[modo],
+                                       estado=estados[modo], ayuda=AYUDA[modo])
 
-        if interfaz.es_detectar(tecla):
-            pendiente, estado = None, ""
-            recorte = zona_placa.recortar_zona(frame, zona)
-            if recorte is None:
-                mensaje = "No se encontro ninguna placa en el frame"
-                print("No se encontró ninguna zona de placa en el frame")
-                continue
+            tecla = interfaz.leer_tecla()  # una sola vez por vuelta
 
-            ocr.detectar_texto(recorte)  # OCR solo dentro de la zona
-            texto = ocr.obtener_texto()
-            print("Texto detectado:", texto)
+            if interfaz.es_detectar(tecla):
+                for modo in cams:
+                    pendientes[modo], estados[modo] = None, ""
+                    if frames[modo] is None:
+                        continue
+                    mensajes[modo], pend = procesar_ocr(frames[modo], zonas[modo], modo)
+                    pendientes[modo] = pend
+                    if pend and modo == "entrada":
+                        estados[modo] = "E = guardar placa"
+                    elif pend:  # salida: busca la tarifa de esa placa
+                        _, estados[modo] = registro.consultar_salida(pend[0])
+                        print("[salida] Tarifa:", estados[modo])
 
-            # Elige del texto la parte que realmente es una placa
-            placa, tipo = extraer_placa(texto)
-            if placa:
-                mensaje = f"{placa} - {tipo}"
-                pendiente = (placa, tipo)
-                print(f"Placa: {placa} | Tipo: {tipo}")
-                if modo == "entrada":
-                    estado = "ENTER = guardar placa"
-                else:  # busca la tarifa de esa placa
-                    _, estado = registro.consultar_salida(placa)
-                    print("Tarifa:", estado)
-            else:
-                mensaje = "Placa no reconocida"
-                print("No se reconoció una placa válida en el texto")
+            elif interfaz.es_guardar(tecla) and "entrada" in cams:
+                pend = pendientes["entrada"]
+                if pend is None:
+                    estados["entrada"] = "Primero detecta una placa (ESPACIO)"
+                else:
+                    _, estados["entrada"] = registro.registrar_placa(*pend)
+                    print("[entrada] Registro:", estados["entrada"])
+                    pendientes["entrada"] = None
 
-        elif interfaz.es_confirmar(tecla):
-            if pendiente is None:
-                estado = "Primero detecta una placa (ESPACIO)"
-            elif modo == "entrada":
-                _, estado = registro.registrar_placa(*pendiente)
-                print("Registro:", estado)
-                pendiente = None
-            else:
-                res, estado = registro.registrar_salida(pendiente[0])
-                print("Salida:", estado)
-                if res != "pay":  # si debe pagar, ENTER de nuevo cuando ya pagó
-                    pendiente = None
+            elif interfaz.es_dejar_salir(tecla) and "salida" in cams:
+                pend = pendientes["salida"]
+                if pend is None:
+                    estados["salida"] = "Primero detecta una placa (ESPACIO)"
+                else:
+                    res, estados["salida"] = registro.registrar_salida(pend[0])
+                    print("[salida] Salida:", estados["salida"])
+                    if res != "pay":  # si debe pagar, vuelve a pulsar S cuando ya pagó
+                        pendientes["salida"] = None
 
-        elif interfaz.es_salir(tecla):
-            break
-
-    camara.cerrar_camara(cap)
+            elif interfaz.es_salir(tecla):
+                break
+    finally:
+        for cam in cams.values():
+            cam.cerrar()
+        cv2.destroyAllWindows()
     print("Último texto leído:", ocr.obtener_texto())
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "entrada")
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg and arg not in INDICES:
+        raise SystemExit("Uso: python main.py [entrada | salida]  (sin argumento = las dos cámaras)")
+    main((arg,) if arg else ("entrada", "salida"))

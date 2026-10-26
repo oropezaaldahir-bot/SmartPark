@@ -8,6 +8,8 @@ TECLA_ESPACIO = ord(' ')
 TECLA_Q = ord('q')
 TECLA_ESC = 27
 TECLA_ENTER = 13
+TECLA_E = ord('e')  # guardar la placa (cámara de entrada)
+TECLA_S = ord('s')  # dejar salir (cámara de salida)
  
  
 def _a_poligono(zona):
@@ -55,3 +57,13 @@ def es_detectar(tecla: int) -> bool:
 
 def es_confirmar(tecla: int) -> bool:
     return tecla == TECLA_ENTER
+
+
+def es_guardar(tecla: int) -> bool:
+    """E: confirma la placa leída en la cámara de ENTRADA."""
+    return tecla in (TECLA_E, ord('E'))
+
+
+def es_dejar_salir(tecla: int) -> bool:
+    """S: confirma la salida de la placa leída en la cámara de SALIDA."""
+    return tecla in (TECLA_S, ord('S'))

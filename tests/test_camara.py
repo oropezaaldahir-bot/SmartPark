@@ -110,58 +110,75 @@ def test_register_entry_conserva_reglas_de_reserva(limpia):
 
 
 # ------------------------------------------------------------------ main.py con cámara simulada
-def _correr_main(monkeypatch, teclas, texto_ocr, modo="entrada"):
-    """Ejecuta main.main() con cámara, OCR, YOLO y ventana simulados. Devuelve los 'estado' dibujados."""
+def _correr_main(monkeypatch, teclas, texto_ocr, modos=("entrada", "salida")):
+    """Ejecuta main.main() con cámaras (hilos), OCR, YOLO y ventanas simulados. Devuelve [(modo, texto, estado)]."""
     dibujos = []
     it = iter(teclas)
 
+    class CamaraFalsa:
+        def __init__(self, indice):
+            self.indice = indice
+        def leer(self):
+            return True, "frame"
+        def cerrar(self):
+            pass
     cam = types.ModuleType("modulos.camara")
-    cam.abrir_camara = lambda indice=1: ("cap", indice)
-    cam.leer_frame = lambda cap: (True, "frame")
-    cam.cerrar_camara = lambda cap: None
+    cam.CamaraHilo = CamaraFalsa
     ocr = types.ModuleType("modulos.ocr")
     ocr.iniciar_ocr = lambda: None
     ocr.detectar_texto = lambda r: None
     ocr.obtener_texto = lambda: texto_ocr
     det = types.ModuleType("modulos.detector_placa")
+    det.cargar_modelo = lambda: None
     det.detectar_zona_placa = lambda f: (10, 10, 100, 50)
     zona = types.ModuleType("modulos.zona_placa")
     zona.recortar_zona = lambda f, z: "recorte"
     ui = types.ModuleType("modulos.interfaz")
-    ui.dibujar_frame = lambda frame, texto, zona=None, titulo="", estado="", ayuda="": dibujos.append((texto, estado))
+    ui.dibujar_frame = lambda frame, texto, zona=None, titulo="", estado="", ayuda="": dibujos.append((titulo, texto, estado))
     ui.leer_tecla = lambda: next(it)
     ui.es_detectar = lambda t: t == 32
-    ui.es_confirmar = lambda t: t == 13
+    ui.es_guardar = lambda t: t == 101      # E
+    ui.es_dejar_salir = lambda t: t == 115  # S
     ui.es_salir = lambda t: t in (113, 27)
     for n, m in (("camara", cam), ("ocr", ocr), ("detector_placa", det), ("zona_placa", zona), ("interfaz", ui)):
         monkeypatch.setitem(sys.modules, f"modulos.{n}", m)
         monkeypatch.setattr(sys.modules["modulos"], n, m, raising=False)
     sys.modules.pop("main", None)
     import main
-    main.main(modo)
+    monkeypatch.setattr(main.cv2, "destroyAllWindows", lambda: None, raising=False)
+    main.main(modos)
     sys.modules.pop("main", None)
     return dibujos
 
 
-def test_main_detectar_confirmar_y_guardar(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [32, 13, 113], "EDOMEX PCH 96 04")
-    assert ("PCH9604 - Automóvil", "ENTER = guardar placa") in d   # tras ESPACIO pide confirmar
+def estados_de(d, titulo):
+    return [e for t, _, e in d if titulo in t]
+
+
+def test_main_entrada_detectar_y_guardar(limpia, monkeypatch):
+    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX PCH 96 04")       # ESPACIO, E, q
+    assert ("Camara de ENTRADA", "PCH9604 - Automóvil", "E = guardar placa") in d
     p = placa("PCH9604")
     assert p and p.vehicle_type == "Automóvil"
-    assert any("guardada" in e for _, e in d)
+    assert any("guardada" in e for e in estados_de(d, "ENTRADA"))
 
 
-def test_main_enter_sin_detectar_no_registra(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [13, 113], "EDOMEX PCH 96 04")
-    assert any("Primero detecta" in e for _, e in d)
+def test_main_e_sin_detectar_no_guarda(limpia, monkeypatch):
+    d = _correr_main(monkeypatch, [101, 113], "EDOMEX PCH 96 04")
+    assert any("Primero detecta" in e for e in estados_de(d, "ENTRADA"))
     assert placa("PCH9604") is None
 
 
-def test_main_texto_ilegible_no_registra(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [32, 13, 113], "MEXICO 2026")
-    assert any(t == "Placa no reconocida" for t, _ in d)
+def test_main_texto_ilegible_no_guarda(limpia, monkeypatch):
+    d = _correr_main(monkeypatch, [32, 101, 113], "MEXICO 2026")
+    assert any(t == "Placa no reconocida" for _, t, _ in d)
     with app.app_context():
         assert Plate.query.count() == 0
+
+
+def test_main_solo_una_camara(limpia, monkeypatch):
+    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX PCH 96 04", modos=("entrada",))
+    assert {t for t, _, _ in d} == {"Camara de ENTRADA"} and placa("PCH9604")
 
 
 # ------------------------------------------------------------------ interfaz real (si hay OpenCV)
@@ -241,25 +258,27 @@ def test_salida_placa_desconocida_o_incompleta(limpia):
     assert registro.registrar_salida("AB")[0] == "invalid"
 
 
-def test_main_salida_cobra_y_deja_salir(limpia, monkeypatch):
-    _dentro(placa="PCH9604", minutos=30)
-    # ESPACIO (consulta tarifa) -> ENTER (debe pagar) -> se paga -> ENTER otra vez (sale) -> q
+def test_main_dos_camaras_a_la_vez_entrada_y_salida(limpia, monkeypatch):
+    """Las dos ventanas viven en el mismo programa: una guarda placas y la otra cobra y deja salir."""
+    _dentro(placa="PCH9604", minutos=30)      # ya está dentro (y su placa guardada)
     pagado = {"hecho": False}
     orig = registro.registrar_salida
 
-    def registrar(placa):  # el pago ocurre justo después del primer intento sin pagar
-        r = orig(placa)
+    def registrar(placa_):  # el pago ocurre justo después del primer intento sin pagar
+        r = orig(placa_)
         if r[0] == "pay" and not pagado["hecho"]:
             with app.app_context():
                 L.add_payment(db.session.get(Reservation, "SP-5001"), "efectivo")
             pagado["hecho"] = True
         return r
     monkeypatch.setattr(registro, "registrar_salida", registrar)
-    d = _correr_main(monkeypatch, [32, 13, 13, 113], "EDOMEX PCH 96 04", modo="salida")
-    estados = [e for _, e in d]
-    assert any("Debe pagar $15" in e for e in estados)           # al detectar muestra la tarifa
-    assert any("NO puede salir" in e for e in estados)           # primer ENTER sin pagar
-    assert any("Placa eliminada" in e for e in estados)          # segundo ENTER ya pagado
+    # ESPACIO (lee en ambas) -> E (guarda en entrada) -> S (debe pagar) -> S (ya pagó: sale) -> q
+    d = _correr_main(monkeypatch, [32, 101, 115, 115, 113], "EDOMEX PCH 96 04")
+    sal = estados_de(d, "SALIDA")
+    assert any("Debe pagar $15" in e for e in sal)       # al detectar muestra la tarifa
+    assert any("NO puede salir" in e for e in sal)       # primera S sin pagar
+    assert any("Placa eliminada" in e for e in sal)      # segunda S ya pagado
+    assert any("guardada" in e for e in estados_de(d, "ENTRADA"))
     with app.app_context():
         assert db.session.get(Reservation, "SP-5001").status == "done"
         assert Plate.query.filter_by(plate_norm="PCH9604").count() == 0
