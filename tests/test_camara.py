@@ -110,7 +110,7 @@ def test_register_entry_conserva_reglas_de_reserva(limpia):
 
 
 # ------------------------------------------------------------------ main.py con cámara simulada
-def _correr_main(monkeypatch, teclas, texto_ocr):
+def _correr_main(monkeypatch, teclas, texto_ocr, modo="entrada"):
     """Ejecuta main.main() con cámara, OCR, YOLO y ventana simulados. Devuelve los 'estado' dibujados."""
     dibujos = []
     it = iter(teclas)
@@ -128,7 +128,7 @@ def _correr_main(monkeypatch, teclas, texto_ocr):
     zona = types.ModuleType("modulos.zona_placa")
     zona.recortar_zona = lambda f, z: "recorte"
     ui = types.ModuleType("modulos.interfaz")
-    ui.dibujar_frame = lambda frame, texto, zona=None, titulo="", estado="": dibujos.append((texto, estado))
+    ui.dibujar_frame = lambda frame, texto, zona=None, titulo="", estado="", ayuda="": dibujos.append((texto, estado))
     ui.leer_tecla = lambda: next(it)
     ui.es_detectar = lambda t: t == 32
     ui.es_confirmar = lambda t: t == 13
@@ -138,7 +138,7 @@ def _correr_main(monkeypatch, teclas, texto_ocr):
         monkeypatch.setattr(sys.modules["modulos"], n, m, raising=False)
     sys.modules.pop("main", None)
     import main
-    main.main()
+    main.main(modo)
     sys.modules.pop("main", None)
     return dibujos
 
@@ -195,3 +195,78 @@ def test_migracion_agrega_columnas(tmp_path):
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert out.stdout.split() == ["walkin", "OLD-111"]  # la fila vieja sigue y las columnas nuevas funcionan
+
+
+# ------------------------------------------------------------------ cámara de SALIDA
+def _dentro(placa="SAL1234", minutos=70):
+    """Un vehículo que entró hace `minutos` y su placa guardada por la cámara de entrada."""
+    with app.app_context():
+        t = L.now() - timedelta(minutes=minutos)
+        r = Reservation(code="SP-5001", plate=L.fmt_plate(placa), spot="D02", start=t, checkin=t, status="in", walkin=True)
+        db.session.add(r)
+        db.session.commit()
+        L.save_plate(placa, "Automóvil")
+
+
+def test_salida_busca_tarifa_y_no_deja_salir_sin_pagar(limpia):
+    _dentro(minutos=70)  # 70 min -> 2 horas iniciadas = $30
+    estado, msg = registro.consultar_salida("SAL1234")
+    assert estado == "pay" and "$30" in msg and "SP-5001" in msg
+    estado, msg = registro.registrar_salida("SAL1234")
+    assert estado == "pay" and "NO puede salir" in msg
+    with app.app_context():
+        assert db.session.get(Reservation, "SP-5001").status == "in"
+        assert Plate.query.filter_by(plate_norm="SAL1234").count() == 1   # la placa sigue guardada
+
+
+def test_salida_pagada_deja_salir_y_borra_la_placa(limpia):
+    _dentro(minutos=70)
+    with app.app_context():
+        L.add_payment(db.session.get(Reservation, "SP-5001"), "tarjeta", "PG-ABC123")
+    assert registro.consultar_salida("SAL 1234")[0] == "ok"
+    estado, msg = registro.registrar_salida("SAL1234")
+    assert estado == "exit" and "Placa eliminada" in msg
+    with app.app_context():
+        r = db.session.get(Reservation, "SP-5001")
+        assert r.status == "done" and r.exit_at and len(r.payments) == 1       # historial y pago se conservan
+        assert Plate.query.filter_by(plate_norm="SAL1234").count() == 0         # placa borrada
+    # sin su placa guardada ya no puede volver a entrar por /acceso hasta que la cámara la guarde otra vez
+    assert "Placa no registrada" in app.test_client().post("/acceso", data={"placa": "SAL1234"}).get_data(as_text=True)
+    # y si intenta salir otra vez, ya no está dentro
+    assert registro.registrar_salida("SAL1234")[0] == "notfound"
+
+
+def test_salida_placa_desconocida_o_incompleta(limpia):
+    assert registro.consultar_salida("ZZZ9999")[0] == "notfound"
+    assert registro.registrar_salida("AB")[0] == "invalid"
+
+
+def test_main_salida_cobra_y_deja_salir(limpia, monkeypatch):
+    _dentro(placa="PCH9604", minutos=30)
+    # ESPACIO (consulta tarifa) -> ENTER (debe pagar) -> se paga -> ENTER otra vez (sale) -> q
+    pagado = {"hecho": False}
+    orig = registro.registrar_salida
+
+    def registrar(placa):  # el pago ocurre justo después del primer intento sin pagar
+        r = orig(placa)
+        if r[0] == "pay" and not pagado["hecho"]:
+            with app.app_context():
+                L.add_payment(db.session.get(Reservation, "SP-5001"), "efectivo")
+            pagado["hecho"] = True
+        return r
+    monkeypatch.setattr(registro, "registrar_salida", registrar)
+    d = _correr_main(monkeypatch, [32, 13, 13, 113], "EDOMEX PCH 96 04", modo="salida")
+    estados = [e for _, e in d]
+    assert any("Debe pagar $15" in e for e in estados)           # al detectar muestra la tarifa
+    assert any("NO puede salir" in e for e in estados)           # primer ENTER sin pagar
+    assert any("Placa eliminada" in e for e in estados)          # segundo ENTER ya pagado
+    with app.app_context():
+        assert db.session.get(Reservation, "SP-5001").status == "done"
+        assert Plate.query.filter_by(plate_norm="PCH9604").count() == 0
+
+
+def test_salida_desde_admin_tambien_borra_la_placa(limpia):
+    _dentro(minutos=10)
+    with app.app_context():
+        L.do_exit(db.session.get(Reservation, "SP-5001"))
+        assert Plate.query.filter_by(plate_norm="SAL1234").count() == 0

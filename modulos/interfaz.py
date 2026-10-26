@@ -22,12 +22,12 @@ def _a_poligono(zona):
     return zona.astype(np.int32).reshape(-1, 1, 2)
  
  
-def dibujar_frame(frame, texto: str, zona=None, titulo: str = "OCR simple", estado: str = ""):
+def dibujar_frame(frame, texto: str, zona=None, titulo: str = "OCR simple", estado: str = "", ayuda: str = "ESPACIO=detectar  ENTER=guardar  Q=salir"):
     """Dibuja las instrucciones, la zona de placa (4 esquinas) y el último texto."""
     display = frame.copy()
     if zona is not None:
         cv2.polylines(display, [_a_poligono(zona)], True, (0, 255, 255), 2)
-    cv2.putText(display, "ESPACIO=detectar  ENTER=guardar  Q=salir", (10, 30),
+    cv2.putText(display, ayuda, (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     # La fuente de OpenCV no dibuja acentos: se quitan solo para mostrar
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()

@@ -271,9 +271,20 @@ def add_payment(r, method, ref=None, amount=None):
 
 
 def do_exit(r):
+    """Registra la salida y BORRA la placa de la tabla `placas`: para volver a entrar
+    la cámara tiene que guardarla otra vez. El historial (visita y pagos) se conserva."""
     r.status = "done"
     r.exit_at = now()
+    Plate.query.filter_by(plate_norm=norm(r.plate)).delete()
     db.session.commit()
+
+
+def inside_by_plate(plate_input):
+    """Visita en curso (status 'in') de una placa, o None."""
+    raw = norm(plate_input)[:7]
+    if len(raw) < 5:
+        return None
+    return next((x for x in Reservation.query.filter_by(status="in").all() if norm(x.plate) == raw), None)
 
 
 def mark_expired(r):
