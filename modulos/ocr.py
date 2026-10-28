@@ -7,7 +7,7 @@ texto_detectado = ""
 _reader = None
 
 
-def iniciar_ocr(idiomas=("es", "en"), gpu: bool = False):
+def iniciar_ocr(idiomas=("es", "en"), gpu: bool = True):
     """Inicializa el lector OCR (se hace una sola vez)."""
     global _reader
     if _reader is None:

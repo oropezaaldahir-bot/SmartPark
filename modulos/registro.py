@@ -7,6 +7,7 @@ Después, en la página /acceso solo se deja entrar a las placas que están guar
 from app import app  # al importar crea las tablas si no existen
 import logic as L
 from models import db
+from modulos.placas import tipo_para_bd
 
 
 def registrar_placa(placa: str, tipo: str = None):
@@ -17,7 +18,8 @@ def registrar_placa(placa: str, tipo: str = None):
     """
     with app.app_context():
         try:
-            estado, p = L.save_plate(placa, tipo)
+            #estado, p = L.save_plate(placa, tipo)
+            estado, p = L.save_plate(placa, tipo_para_bd(tipo) if tipo else None)
         except Exception as e:  # base caída, bloqueada, mal configurada...
             db.session.rollback()
             print(f"[BD] Error al guardar {placa}: {e}")
