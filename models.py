@@ -44,6 +44,22 @@ class Payment(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     method = db.Column(db.String(10), nullable=False)  # tarjeta | efectivo
     ref = db.Column(db.String(20))
+    # Idea de la base de alexishh: un folio no se puede usar dos veces con el mismo método
+    # (el efectivo no lleva folio: NULL se puede repetir).
+    __table_args__ = (db.UniqueConstraint("method", "ref", name="uk_pagos_metodo_ref"),)
+
+
+class Spot(db.Model):
+    """Los 48 cajones (idea de la tabla `lugares` de alexishh). Guarda el tipo y, para los cajones
+    con sensor (ESP32), lo último que reportó el sensor."""
+
+    __tablename__ = "lugares"
+
+    code = db.Column(db.String(3), primary_key=True)  # A01..F08
+    area = db.Column(db.String(1), nullable=False, index=True)
+    kind = db.Column(db.String(10), nullable=False, default="Normal")  # Normal | Accesible
+    sensor_busy = db.Column(db.Boolean)  # None = este cajón no tiene sensor
+    sensor_at = db.Column(db.DateTime)  # cuándo reportó el sensor
 
 
 class Plate(db.Model):

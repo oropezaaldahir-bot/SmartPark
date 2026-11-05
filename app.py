@@ -33,11 +33,22 @@ def ensure_columns():
         if name not in cols:
             db.session.execute(text(f"ALTER TABLE reservaciones {add} {name} {ddl}"))
     db.session.commit()
+    # Bases creadas antes: create_all no agrega restricciones a tablas que ya existen
+    uniques = {u["name"] for u in inspect(db.engine).get_unique_constraints("pagos")}
+    idx = {i["name"] for i in inspect(db.engine).get_indexes("pagos")}
+    if "uk_pagos_metodo_ref" not in uniques | idx:
+        try:
+            db.session.execute(text("CREATE UNIQUE INDEX uk_pagos_metodo_ref ON pagos (method, ref)"))
+            db.session.commit()
+        except Exception as e:  # ya hay folios repetidos: se deja sin la restricción y se avisa
+            db.session.rollback()
+            print(f"[BD] No se pudo crear uk_pagos_metodo_ref: {e}")
 
 
 with app.app_context():
     db.create_all()
     ensure_columns()
+    L.seed_spots()
     if config.SEED_DEMO:
         L.seed_demo()
 

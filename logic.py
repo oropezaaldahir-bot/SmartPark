@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timedelta
 
 from config import AREAS, HOLD, RATE, SPOTS_PER_AREA, TOL, TZ
-from models import Employee, Payment, Plate, Reservation, db
+from models import Employee, Payment, Plate, Reservation, Spot, db
 
 HOUR = timedelta(hours=1)
 DEAD = ("cancelled", "expired", "done")
@@ -435,6 +435,24 @@ def chart_svg():
 
 
 # ---------------------------------------------------------------- datos de ejemplo
+def seed_spots():
+    """Crea los cajones que falten en la tabla `lugares`. El primero de cada área es Accesible."""
+    have = {c for (c,) in db.session.query(Spot.code).all()}
+    for a in AREAS:
+        for i, code in enumerate(spot_ids(a["id"])):
+            if code not in have:
+                db.session.add(Spot(code=code, area=a["id"], kind="Accesible" if i == 0 else "Normal"))
+    db.session.commit()
+
+
+def new_folio():
+    """Folio de la pasarela que no se haya usado antes (la base no acepta folios repetidos)."""
+    while True:
+        folio = "PG-%06d" % random.randint(0, 999999)
+        if not Payment.query.filter_by(ref=folio).first():
+            return folio
+
+
 def seed_demo():
     """Carga los vehículos DEMO la primera vez (la base está vacía)."""
     if Reservation.query.count():

@@ -33,18 +33,23 @@ def fila(placa):
 
 # ------------------------------------------------------------------ OCR -> placa (código tuyo, sin cambios)
 @pytest.mark.parametrize("texto,placa,tipo", [
-    ("EDOMEX PCH 96 04", "PCH9604", "Automóvil"),
-    ("T PCH-96-04 EDOMEX", "PCH9604", "Automóvil"),
-    ("Y123AB", "Y123AB", "Motocicleta"),
-    ("AB12345", "AB12345", "Camión"),
-    ("PCH 96O4", "PCH9604", "Automóvil"),  # O leída en lugar de 0
+    ("EDOMEX A12 BCD", "A12BCD", "Automóvil"),
+    ("CIUDAD DE MEXICO A12 BCD", "A12BCD", "Automóvil"),
+    ("AB123C", "AB123C", "Motocicleta"),
+    ("ABC-123-D", "ABC123D", "Automóvil / Camión / Grúa"),   # formato compartido por varios tipos
 ])
 def test_extraer_placa(texto, placa, tipo):
     assert extraer_placa(texto) == (placa, tipo)
 
 
+def test_tipo_para_bd():
+    from modulos.placas import tipo_para_bd
+    assert tipo_para_bd("Automóvil") == "Automóvil" and tipo_para_bd("Automóvil / Camión / Grúa") == "Varios"
+    assert len(tipo_para_bd("Automóvil / Camión / Grúa")) <= 12   # cabe en vehicle_type
+
+
 def test_extraer_placa_invalida():
-    assert extraer_placa("MEXICO 2026") == (None, "Inválida")
+    assert extraer_placa("MEXICO 2026") == (None, "Desconocido")
 
 
 # ------------------------------------------------------------------ guardar placas en la base
@@ -54,31 +59,31 @@ def placa(norm_):
 
 
 def test_camara_guarda_placa_nueva(limpia):
-    estado, msg = registro.registrar_placa("PCH9604", "Automóvil")
+    estado, msg = registro.registrar_placa("A12BCD", "Automóvil")
     assert estado == "new" and "guardada" in msg
-    p = placa("PCH9604")
-    assert p.plate == "PCH-9604" and p.vehicle_type == "Automóvil" and p.hits == 1
+    p = placa("A12BCD")
+    assert p.plate == "A12-BCD" and p.vehicle_type == "Automóvil" and p.hits == 1
     # la cámara NO abre boleto: la entrada se hace después en /acceso
     with app.app_context():
-        assert Reservation.query.filter(Reservation.plate == "PCH-9604").count() == 0
+        assert Reservation.query.filter(Reservation.plate == "A12-BCD").count() == 0
 
 
 def test_camara_misma_placa_no_duplica(limpia):
-    registro.registrar_placa("PCH9604", "Automóvil")
-    estado, msg = registro.registrar_placa("pch 96-04", "Automóvil")
+    registro.registrar_placa("A12BCD", "Automóvil")
+    estado, msg = registro.registrar_placa("a12 b-cd", "Automóvil")
     assert estado == "known" and "ya estaba" in msg
     with app.app_context():
-        assert Plate.query.count() == 1 and placa("PCH9604").hits == 2
+        assert Plate.query.count() == 1 and placa("A12BCD").hits == 2
 
 
 def test_placa_guardada_por_camara_puede_entrar_por_acceso(limpia):
     c = app.test_client()
-    assert "Placa no registrada" in c.post("/acceso", data={"placa": "PCH9604"}).get_data(as_text=True)
-    registro.registrar_placa("PCH9604", "Automóvil")
-    r = c.post("/acceso", data={"placa": "PCH9604"})
+    assert "Placa no registrada" in c.post("/acceso", data={"placa": "A12BCD"}).get_data(as_text=True)
+    registro.registrar_placa("A12BCD", "Automóvil")
+    r = c.post("/acceso", data={"placa": "A12BCD"})
     assert r.status_code == 302
     with app.app_context():
-        w = Reservation.query.filter_by(plate="PCH-9604").one()
+        w = Reservation.query.filter_by(plate="A12-BCD").one()
         assert w.status == "in" and w.source == "web"
 
 
@@ -92,7 +97,7 @@ def test_base_caida_no_rompe_la_camara(limpia, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("base caída")
     monkeypatch.setattr(L, "save_plate", boom)
-    estado, msg = registro.registrar_placa("PCH9604", "Automóvil")
+    estado, msg = registro.registrar_placa("A12BCD", "Automóvil")
     assert estado == "error" and "base de datos" in msg
 
 
@@ -156,17 +161,17 @@ def estados_de(d, titulo):
 
 
 def test_main_entrada_detectar_y_guardar(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX PCH 96 04")       # ESPACIO, E, q
-    assert ("Camara de ENTRADA", "PCH9604 - Automóvil", "E = guardar placa") in d
-    p = placa("PCH9604")
+    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX A12 BCD")       # ESPACIO, E, q
+    assert ("Camara de ENTRADA", "A12BCD - Automóvil", "E = guardar placa") in d
+    p = placa("A12BCD")
     assert p and p.vehicle_type == "Automóvil"
     assert any("guardada" in e for e in estados_de(d, "ENTRADA"))
 
 
 def test_main_e_sin_detectar_no_guarda(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [101, 113], "EDOMEX PCH 96 04")
+    d = _correr_main(monkeypatch, [101, 113], "EDOMEX A12 BCD")
     assert any("Primero detecta" in e for e in estados_de(d, "ENTRADA"))
-    assert placa("PCH9604") is None
+    assert placa("A12BCD") is None
 
 
 def test_main_texto_ilegible_no_guarda(limpia, monkeypatch):
@@ -177,8 +182,8 @@ def test_main_texto_ilegible_no_guarda(limpia, monkeypatch):
 
 
 def test_main_solo_una_camara(limpia, monkeypatch):
-    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX PCH 96 04", modos=("entrada",))
-    assert {t for t, _, _ in d} == {"Camara de ENTRADA"} and placa("PCH9604")
+    d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX A12 BCD", modos=("entrada",))
+    assert {t for t, _, _ in d} == {"Camara de ENTRADA"} and placa("A12BCD")
 
 
 # ------------------------------------------------------------------ interfaz real (si hay OpenCV)
@@ -260,7 +265,7 @@ def test_salida_placa_desconocida_o_incompleta(limpia):
 
 def test_main_dos_camaras_a_la_vez_entrada_y_salida(limpia, monkeypatch):
     """Las dos ventanas viven en el mismo programa: una guarda placas y la otra cobra y deja salir."""
-    _dentro(placa="PCH9604", minutos=30)      # ya está dentro (y su placa guardada)
+    _dentro(placa="A12BCD", minutos=30)      # ya está dentro (y su placa guardada)
     pagado = {"hecho": False}
     orig = registro.registrar_salida
 
@@ -273,7 +278,7 @@ def test_main_dos_camaras_a_la_vez_entrada_y_salida(limpia, monkeypatch):
         return r
     monkeypatch.setattr(registro, "registrar_salida", registrar)
     # ESPACIO (lee en ambas) -> E (guarda en entrada) -> S (debe pagar) -> S (ya pagó: sale) -> q
-    d = _correr_main(monkeypatch, [32, 101, 115, 115, 113], "EDOMEX PCH 96 04")
+    d = _correr_main(monkeypatch, [32, 101, 115, 115, 113], "EDOMEX A12 BCD")
     sal = estados_de(d, "SALIDA")
     assert any("Debe pagar $15" in e for e in sal)       # al detectar muestra la tarifa
     assert any("NO puede salir" in e for e in sal)       # primera S sin pagar
@@ -281,7 +286,7 @@ def test_main_dos_camaras_a_la_vez_entrada_y_salida(limpia, monkeypatch):
     assert any("guardada" in e for e in estados_de(d, "ENTRADA"))
     with app.app_context():
         assert db.session.get(Reservation, "SP-5001").status == "done"
-        assert Plate.query.filter_by(plate_norm="PCH9604").count() == 0
+        assert Plate.query.filter_by(plate_norm="A12BCD").count() == 0
 
 
 def test_salida_desde_admin_tambien_borra_la_placa(limpia):

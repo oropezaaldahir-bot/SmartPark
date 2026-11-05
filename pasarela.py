@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from config import DEMO_PAGOS
-from logic import add_payment, card_error, money, now
+from logic import add_payment, card_error, money, new_folio, now
 from models import Reservation, db
 
 bp = Blueprint("pasarela", __name__, url_prefix="/pasarela")
@@ -92,7 +92,7 @@ def ver():
         # La tarjeta solo se valida; no se guarda ni se vuelve a mostrar.
         msg = card_error(request.form.get("cc"), request.form.get("exp"), request.form.get("cvv"))
         if not msg:
-            folio = "PG-%06d" % random.randint(0, 999999)
+            folio = new_folio()
             complete_checkout(c, "ok", folio)
             return render_template("pasarela.html", state="done", folio=folio, ret=c["return"])
 

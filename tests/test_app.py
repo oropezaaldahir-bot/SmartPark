@@ -295,3 +295,43 @@ def test_grafica_cuenta_entradas_reales_por_dia(client):
     login(client)
     html = client.get("/admin/").get_data(as_text=True)
     assert "últimos 7 días" in html and "entradas</title>" in html
+
+
+# ---------------------------------------------------------------- ideas tomadas de la base de alexishh
+def test_folio_de_pago_no_se_repite(client):
+    from sqlalchemy.exc import IntegrityError
+    with app.app_context():
+        r = db.session.get(Reservation, "SP-0001")
+        L.add_payment(r, "tarjeta", ref="PG-000001", amount=15)
+        with pytest.raises(IntegrityError):          # el mismo folio con el mismo método
+            L.add_payment(db.session.get(Reservation, "SP-0002"), "tarjeta", ref="PG-000001", amount=15)
+        db.session.rollback()
+        L.add_payment(db.session.get(Reservation, "SP-0002"), "efectivo", amount=15)   # efectivo: sin folio, se puede repetir
+        L.add_payment(db.session.get(Reservation, "SP-0005"), "efectivo", amount=15)
+        assert L.new_folio().startswith("PG-") and L.new_folio() != "PG-000001"
+
+
+def test_lugares_48_con_accesibles(client):
+    from models import Spot
+    with app.app_context():
+        L.seed_spots()                                # repetirlo no duplica
+        assert Spot.query.count() == 48
+        assert sorted(s.code for s in Spot.query.filter_by(kind="Accesible")) == ["A01", "B01", "C01", "D01", "E01", "F01"]
+        assert Spot.query.filter(Spot.sensor_busy.isnot(None)).count() == 0   # aún sin sensores
+
+
+def test_base_sql_coincide_con_los_modelos():
+    """base.sql debe tener las mismas tablas y columnas que models.py (evita que se desfasen)."""
+    import re
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "base.sql"), encoding="utf-8").read()
+    sql = {}
+    for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", src, re.S):
+        cols = set()
+        for line in m.group(2).splitlines():
+            t = line.strip().split()
+            if t and t[0].upper() not in ("CONSTRAINT", "PRIMARY", "UNIQUE", "KEY", "FOREIGN", "--"):
+                cols.add(t[0])
+        sql[m.group(1)] = cols
+    for table in db.metadata.sorted_tables:
+        assert table.name in sql, f"base.sql no tiene la tabla {table.name}"
+        assert sql[table.name] == {c.name for c in table.columns}, table.name

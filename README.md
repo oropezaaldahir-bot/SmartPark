@@ -54,7 +54,7 @@ Muestra las entradas reales de los últimos 7 días: cada vehículo que entra su
 
 ## Base de datos SQL
 Por defecto usa SQLite (`smartpark.db`). Para MySQL, PostgreSQL o SQL Server, define `DATABASE_URL`
-(ejemplos en `config.py`; el conector va en `requirements.txt`) e instala el conector. Tablas: `reservaciones`, `pagos`, `empleados`, `placas`
+(ejemplos en `config.py`; el conector va en `requirements.txt`) e instala el conector. Tablas: `reservaciones`, `pagos`, `empleados`, `placas`, `lugares`. La base de alexishh (MySQL con triggers) está en `referencia/` con su revisión
 (SQL puro en `base.sql`).
 
 ## Archivos
