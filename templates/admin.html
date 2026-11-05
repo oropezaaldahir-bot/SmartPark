@@ -96,7 +96,7 @@
               <td><span class="tag {{ 'busy' if x.inn else 'resv' }}">{{ 'Ocupado' if x.inn else 'Reservado' }}</span></td>
               <td>{{ x.hora }}</td>
               <td>{{ x.dur }}</td>
-              <td>{% if x.inn %}{% if x.due > 0 %}<span class="tag bad">${{ x.due }} por cobrar</span>{% else %}<span class="tag ok">Pagado</span>{% endif %}{% else %}—{% endif %}</td>
+              <td>{% if x.inn %}{% if x.due > 0 %}<span class="tag bad">${{ x.due }} por cobrar</span>{% elif x.emp and x.free %}<span class="tag ok">Empleado $0</span>{% else %}<span class="tag ok">Pagado</span>{% endif %}{% else %}—{% endif %}</td>
               <td class="act">
                 {% if x.inn %}
                 <a class="btn sm{{ '' if x.due > 0 else ' ghost' }}" href="{{ url_for('admin.confirm', action='out', code=x.r.code) }}">{{ 'Cobrar y salir' if x.due > 0 else 'Registrar salida' }}</a>

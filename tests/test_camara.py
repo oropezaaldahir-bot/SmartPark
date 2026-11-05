@@ -294,3 +294,20 @@ def test_salida_desde_admin_tambien_borra_la_placa(limpia):
     with app.app_context():
         L.do_exit(db.session.get(Reservation, "SP-5001"))
         assert Plate.query.filter_by(plate_norm="SAL1234").count() == 0
+
+
+def test_salida_empleado_sin_cobro_y_sigue_conocido(limpia):
+    with app.app_context():
+        from models import Employee
+        db.session.add(Employee(name="Ana", plate="EMP-001", plate_norm="EMP001"))
+        t = L.now() - timedelta(hours=3)
+        db.session.add(Reservation(code="SP-5002", plate="EMP-001", spot="D03", start=t, checkin=t, status="in", walkin=True))
+        db.session.commit()
+    estado, msg = registro.consultar_salida("EMP001")
+    assert estado == "ok" and "empleado" in msg and "sin cobro" in msg
+    estado, msg = registro.registrar_salida("EMP001")
+    assert estado == "exit" and "sin cobro" in msg
+    with app.app_context():
+        r = db.session.get(Reservation, "SP-5002")
+        assert r.status == "done" and r.payments == []
+        assert L.plate_known("EMP001")             # su placa sigue siendo válida para volver a entrar

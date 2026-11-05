@@ -26,6 +26,7 @@ LOCK_SECONDS = 30
 # ---- Negocio ----
 TZ = ZoneInfo(os.getenv("APP_TZ", "America/Mexico_City"))
 RATE = 15  # tarifa: $15 MXN por hora (o fracción)
+RATE_EMP = int(os.getenv("RATE_EMPLEADO", "0"))  # tarifa de las placas de empleados (0 = no pagan)
 TOL = timedelta(minutes=15)  # tolerancia de llegada y de salida tras pagar
 HOLD = timedelta(minutes=10)  # tiempo que se aparta un cajón mientras se paga
 SPOTS_PER_AREA = 8

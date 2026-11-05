@@ -335,3 +335,67 @@ def test_base_sql_coincide_con_los_modelos():
     for table in db.metadata.sorted_tables:
         assert table.name in sql, f"base.sql no tiene la tabla {table.name}"
         assert sql[table.name] == {c.name for c in table.columns}, table.name
+
+
+# ---------------------------------------------------------------- empleados: tarifa $0 (idea de la base de alexishh)
+def _empleado_dentro(horas=3):
+    """Empleado EMP-001 que entró hace `horas` horas. Devuelve el código del boleto."""
+    with app.app_context():
+        db.session.add(Employee(name="Ana", plate="EMP-001", plate_norm="EMP001"))
+        t = L.now() - timedelta(hours=horas, minutes=5)
+        db.session.add(Reservation(code="SP-8001", plate="EMP-001", spot="D05", start=t, checkin=t, status="in", walkin=True))
+        db.session.commit()
+    return "SP-8001"
+
+
+def test_empleado_no_paga_estacionamiento(client):
+    code = _empleado_dentro()
+    with app.app_context():
+        r = db.session.get(Reservation, code)
+        assert L.rate_of(r) == 0 and L.cost_of(r) == 0 and L.due_of(r) == 0 and L.is_free(r)
+        assert L.rate_of(db.session.get(Reservation, "SP-0007")) == 15   # un visitante sigue pagando
+    page = client.get(f"/boleto/{code}").get_data(as_text=True)
+    assert "EMPLEADO" in page and "Tarifa de empleado" in page and "Pagar en línea" not in page
+    assert "Pagar estacionamiento" not in page
+    assert client.get(f"/boleto/{code}/ticket.png").data[:4] == b"\x89PNG"
+    # el boleto de reservaciones también lo muestra
+    with client.session_transaction() as s:
+        s["mine"] = code
+    assert "Sin costo" in client.get("/reservar").get_data(as_text=True)
+
+
+def test_empleado_admin_sale_sin_cobro(client):
+    code = _empleado_dentro()
+    login(client)
+    html = client.get("/admin/").get_data(as_text=True)
+    assert "Empleado $0" in html and "por cobrar" not in html.split("EMP-001")[1].split("</tr>")[0]
+    assert "sin cobro" in client.get(f"/admin/confirmar/out?code={code}").get_data(as_text=True)
+    client.post("/admin/accion/out", data={"code": code})
+    with app.app_context():
+        r = db.session.get(Reservation, code)
+        assert r.status == "done" and r.payments == []         # no se cobró nada
+    boleto = client.get(f"/boleto/{code}").get_data(as_text=True)
+    assert "sin costo" in boleto.lower()
+
+
+def test_empleado_dado_de_baja_vuelve_a_pagar(client):
+    code = _empleado_dentro(horas=2)
+    login(client)
+    client.post("/admin/accion/empdel", data={"id": 1})
+    with app.app_context():
+        assert L.due_of(db.session.get(Reservation, code)) == 45   # 2 h y 5 min -> 3 horas iniciadas a $15
+
+
+def test_tarifa_de_empleado_configurable(client, monkeypatch):
+    code = _empleado_dentro(horas=1)
+    monkeypatch.setattr(L, "RATE_EMP", 5)                          # RATE_EMPLEADO=5
+    with app.app_context():
+        r = db.session.get(Reservation, code)
+        assert L.due_of(r) == 10 and not L.is_free(r)               # 2 horas iniciadas a $5
+
+
+def test_boleto_muestra_su_subtitulo(client):
+    """El encabezado usa la variable `sub`; el subtítulo del boleto no debe quedar tapado por ella."""
+    r = client.post("/acceso", data={"placa": "XYZ1234"})
+    page = client.get(r.headers["Location"]).get_data(as_text=True)
+    assert '<p class="lead">Conserva este boleto digital</p>' in page

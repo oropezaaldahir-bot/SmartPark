@@ -49,6 +49,12 @@ Teclas: **ESPACIO** = leer la placa en las cámaras abiertas · **E** = (entrada
 - Se pide confirmar con E / S para no usar una lectura equivocada del OCR.
 - Si la base no responde, la cámara no se cierra: muestra "No se pudo guardar en la base de datos".
 
+## Empleados
+Las placas que registra el administrador en "Empleados" no pagan el estacionamiento (tarifa de empleado $0;
+cámbiala con `RATE_EMPLEADO`). Entran, salen y se ven en el boleto como "Tarifa de empleado" sin pasar por la pasarela.
+Si se da de baja a un empleado que está dentro, su estancia se cobra completa a la tarifa normal.
+La tarifa de reservación se cobra igual a todos.
+
 ## Gráfica del administrador
 Muestra las entradas reales de los últimos 7 días: cada vehículo que entra suma 1 en la barra de su día.
 

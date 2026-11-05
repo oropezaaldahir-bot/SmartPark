@@ -4,7 +4,7 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-from logic import code39, cost_of, due_of, fmt_dur, fmt_plate, money, now, paid_of
+from logic import code39, cost_of, due_of, fmt_dur, fmt_plate, is_free, money, now, paid_of
 
 _FONTS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -51,7 +51,9 @@ def build(r):
     line("CAJÓN ASIGNADO", f"{r.spot[0]}-{r.spot[1:]}  (Área {r.spot[0]})", 445, "#b86a00", 44)
     line("HORA DE ENTRADA", r.checkin.strftime("%d/%m/%Y %H:%M"), 555)
     line("TIEMPO DENTRO", fmt_dur(end - r.checkin), 665)
-    if settled:
+    if is_free(r):
+        line("TARIFA DE EMPLEADO", "Sin costo", 775, "#15704a", 44)
+    elif settled:
         line("TOTAL PAGADO", money(paid), 775, "#15704a", 44)
     else:
         line("TOTAL A PAGAR", money(due), 775, "#1c2333", 44)

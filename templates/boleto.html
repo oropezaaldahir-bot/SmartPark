@@ -17,7 +17,7 @@
       <svg width="34" height="34" viewBox="0 0 38 38" fill="none" stroke="#3ddc97" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20l8 8 14-16" /></svg>
     </div>
     <h1>{{ title }}</h1>
-    <p class="lead">{{ sub }}</p>
+    <p class="lead">{{ lead }}</p>
 
     <div class="tk">
       <div class="tkh">
@@ -33,7 +33,7 @@
       <div class="g2 g2b">
         <div class="bx"><small>Tiempo dentro</small><b>{{ dur }}</b></div>
         <div class="bx tot{{ ' paid' if show_paid }}">
-          <small>{{ 'Total pagado' if show_paid else ('Por pagar' if paid > 0 else 'Total a pagar') }}</small>
+          <small>{{ 'Tarifa de empleado' if free else 'Total pagado' if show_paid else ('Por pagar' if paid > 0 else 'Total a pagar') }}</small>
           <b>${{ paid if show_paid else due }}</b>
         </div>
       </div>
@@ -50,8 +50,11 @@
     <div class="card pay{{ ' ok' if done or settled }}">
       {% if done %}
         <h2>Salida registrada</h2>
-        <p class="sub">Pagaste <b>{{ money(paid) }}</b>. ¡Gracias por visitarnos!</p>
+        <p class="sub">{% if free and paid == 0 %}Tarifa de empleado: sin costo.{% else %}Pagaste <b>{{ money(paid) }}</b>.{% endif %} ¡Gracias por visitarnos!</p>
         <a class="btn ghost block" href="{{ url_for('boleto_png', code=r.code) }}" download>Descargar recibo</a>
+      {% elif free %}
+        <h2 class="stamp">✓ Tarifa de empleado</h2>
+        <p class="sub">Tu estacionamiento no tiene costo (<b>{{ money(0) }}</b>). Puedes salir cuando quieras.</p>
       {% elif due > 0 %}
         <h2>Pagar estacionamiento</h2>
         <div class="amt">${{ due }}<small> MXN</small></div>

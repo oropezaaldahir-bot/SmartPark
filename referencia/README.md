@@ -18,16 +18,15 @@ mejor de la base de alexishh.
 | Idea de alexishh | Cómo quedó en SmartPark |
 |---|---|
 | `UNIQUE (metodo_pago, referencia_transaccion)`: un folio no se cobra dos veces | `pagos` tiene `UNIQUE (method, ref)`; la pasarela genera folios que no se repiten (`new_folio`). Las bases antiguas reciben el índice al arrancar. |
+| Categoría con tarifa distinta: `Trabajador` = $0 por hora | Las placas de empleados no pagan estacionamiento (`RATE_EMPLEADO`, por defecto 0; `logic.rate_of`). Se refleja en el cobro, el boleto, el recibo PNG, el panel de administrador y la cámara de salida. La reservación sí se sigue cobrando. |
 | Tabla `lugares` con los 48 cajones y tipo `Normal`/`Accesible` | Tabla `lugares` (modelo `Spot`), con el primer cajón de cada área como Accesible. Además lleva `sensor_busy` y `sensor_at`, que usarán las ESP32. |
 
 ## Lo que conviene decidir (no se aplicó)
-1. **Empleados con tarifa $0** (`categorias`: General $15, Trabajador $0). Hoy el panel solo avisa
-   "revisar si aplica descuento". Es la mejora con más valor, pero cambia el cobro y las pantallas del boleto.
-2. **Adeudo:** una salida sin pagar bloquea la siguiente entrada de esa placa. Con la pluma de salida que solo
+1. **Adeudo:** una salida sin pagar bloquea la siguiente entrada de esa placa. Con la pluma de salida que solo
    abre al pagar casi no ocurre; sirve si el administrador deja salir a alguien sin cobrar.
-3. **Un solo vehículo activo por cajón y por placa a nivel de base de datos** (columnas generadas con índice
+2. **Un solo vehículo activo por cajón y por placa a nivel de base de datos** (columnas generadas con índice
    único). Hoy lo garantiza el código Python; la base lo garantizaría aun con dos servidores a la vez.
-4. **Triggers y procedimientos:** duplicarían la lógica de `logic.py` y chocan con el flujo actual (ver abajo).
+3. **Triggers y procedimientos:** duplicarían la lógica de `logic.py` y chocan con el flujo actual (ver abajo).
 
 ## Problemas de su archivo (para hablarlo con él)
 - **Depura la placa al pagar, no al salir.** `trg_pago_depuracion_placa` cierra la sesión (`Pagada`, con
