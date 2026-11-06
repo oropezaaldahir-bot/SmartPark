@@ -33,11 +33,22 @@ def ensure_columns():
         if name not in cols:
             db.session.execute(text(f"ALTER TABLE reservaciones {add} {name} {ddl}"))
     db.session.commit()
+    # Bases creadas antes: create_all no agrega restricciones a tablas que ya existen
+    uniques = {u["name"] for u in inspect(db.engine).get_unique_constraints("pagos")}
+    idx = {i["name"] for i in inspect(db.engine).get_indexes("pagos")}
+    if "uk_pagos_metodo_ref" not in uniques | idx:
+        try:
+            db.session.execute(text("CREATE UNIQUE INDEX uk_pagos_metodo_ref ON pagos (method, ref)"))
+            db.session.commit()
+        except Exception as e:  # ya hay folios repetidos: se deja sin la restricción y se avisa
+            db.session.rollback()
+            print(f"[BD] No se pudo crear uk_pagos_metodo_ref: {e}")
 
 
 with app.app_context():
     db.create_all()
     ensure_columns()
+    L.seed_spots()
     if config.SEED_DEMO:
         L.seed_demo()
 
@@ -92,23 +103,26 @@ def boleto(code=None):
     session["last"] = r.code
     paid, due = L.paid_of(r), L.due_of(r)
     done = r.status == "done"
-    settled = paid > 0 and due == 0
+    free = L.is_free(r)  # empleado: no paga estacionamiento
+    settled = (paid > 0 and due == 0) or (free and not done)
     dup = request.args.get("d") == "1"
     if done:
-        title, sub = "Salida registrada", "Gracias por visitarnos"
+        title, lead = "Salida registrada", "Gracias por visitarnos"
+    elif free:
+        title, lead = "Tarifa de empleado", "Tu estacionamiento no tiene costo"
     elif settled:
-        title, sub = "Pago registrado", "Ya puedes salir"
+        title, lead = "Pago registrado", "Ya puedes salir"
     elif dup:
-        title, sub = "Ya estás dentro", "Este es tu boleto digital"
+        title, lead = "Ya estás dentro", "Este es tu boleto digital"
     else:
-        title, sub = "¡Ingreso exitoso!", "Conserva este boleto digital"
+        title, lead = "¡Ingreso exitoso!", "Conserva este boleto digital"
     until = L.grace_until(r)
     return render_template(
-        "boleto.html", r=r, paid=paid, due=due, done=done, settled=settled, title=title, sub=sub,
-        pill=("SALIDA", "out") if done else ("PAGADO", "paid") if settled else ("ENTRADA", ""),
+        "boleto.html", r=r, paid=paid, due=due, done=done, settled=settled, title=title, lead=lead,
+        pill=("SALIDA", "out") if done else ("EMPLEADO", "paid") if free else ("PAGADO", "paid") if settled else ("ENTRADA", ""),
         dur=L.fmt_dur((r.exit_at or L.now()) - r.checkin), entry=L.clock_label(r.checkin),
         spot_lbl=f"{r.spot[0]}-{r.spot[1:]}", emp=L.is_emp(r.plate), barcode=L.barcode_svg(r.code),
-        until=until, show_paid=done or settled,
+        until=until, show_paid=done or settled, free=free,
     )
 
 
@@ -226,6 +240,7 @@ def _render_ticket(r):
     occ = L.occupancy()
     return render_template(
         "reservaciones.html", mode="ticket", r=r, a=a, cls=cls, txt=txt, inside=inside, dead=dead, due=due,
+        rate=L.rate_of(r), free=L.is_free(r),
         paid=L.paid_of(r), grid=L.area_grid(a["id"], occ, r.spot, interactive=False),
     )
 

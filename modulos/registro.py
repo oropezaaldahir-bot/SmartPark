@@ -7,6 +7,7 @@ Después, en la página /acceso solo se deja entrar a las placas que están guar
 from app import app  # al importar crea las tablas si no existen
 import logic as L
 from models import db
+from modulos.placas import tipo_para_bd
 
 
 def registrar_placa(placa: str, tipo: str = None):
@@ -17,7 +18,8 @@ def registrar_placa(placa: str, tipo: str = None):
     """
     with app.app_context():
         try:
-            estado, p = L.save_plate(placa, tipo)
+            #estado, p = L.save_plate(placa, tipo)
+            estado, p = L.save_plate(placa, tipo_para_bd(tipo) if tipo else None)
         except Exception as e:  # base caída, bloqueada, mal configurada...
             db.session.rollback()
             print(f"[BD] Error al guardar {placa}: {e}")
@@ -41,6 +43,8 @@ def consultar_salida(placa: str):
             if not r:
                 return "notfound", f"No hay un vehículo dentro con la placa {L.fmt_plate(L.norm(placa)[:7])}."
             due = L.due_of(r)
+            if due == 0 and L.is_free(r) and not r.payments:
+                return "ok", f"{r.plate}: empleado, sin cobro. Puede salir."
             if due > 0:
                 return "pay", f"{r.plate}: dentro {L.fmt_dur(L.now() - r.checkin)}. Debe pagar {L.money(due)} (boleto {r.code})."
             return "ok", f"{r.plate}: pago listo. Puede salir."
@@ -63,8 +67,10 @@ def registrar_salida(placa: str):
             due = L.due_of(r)
             if due > 0:
                 return "pay", f"NO puede salir: debe pagar {L.money(due)} (boleto {r.code})."
+            sin_cobro = L.is_free(r) and not r.payments
             L.do_exit(r)
-            return "exit", f"Salida registrada: {r.plate}. Placa eliminada. ¡Buen viaje!"
+            return "exit", (f"Salida registrada: {r.plate} (empleado, sin cobro). ¡Buen viaje!" if sin_cobro
+                            else f"Salida registrada: {r.plate}. Placa eliminada. ¡Buen viaje!")
         except Exception as e:
             db.session.rollback()
             print(f"[BD] Error al registrar salida de {placa}: {e}")

@@ -93,8 +93,8 @@
         <div class="row"><span>Llegada</span><b>{{ day_label(r.start) }}, {{ hhmm(r.start) }}</b></div>
         <div class="row"><span>Reservación</span><b>{% if r.fee_amount %}{{ money(r.fee_amount) }} · pagada{% else %}—{% endif %}</b></div>
         <div class="row">
-          <span>{{ ('Por pagar' if due > 0 else 'Pagado') if inside else ('Total pagado' if r.status == 'done' else 'Tarifa') }}</span>
-          <b>{{ (money(due) if due > 0 else money(paid)) if inside else (money(paid) if r.status == 'done' else money(RATE) ~ ' / hora') }}</b>
+          <span>{{ 'Tarifa de empleado' if free and inside else ('Por pagar' if due > 0 else 'Pagado') if inside else ('Total pagado' if r.status == 'done' else 'Tarifa') }}</span>
+          <b>{{ ('Sin costo' if free else money(due) if due > 0 else money(paid)) if inside else (money(paid) if r.status == 'done' else money(rate) ~ ' / hora') }}</b>
         </div>
       </div>
       <p class="note" style="padding: 0 18px 16px">Al llegar, registra tu placa en el <a href="{{ url_for('acceso') }}">acceso</a> para confirmar tu entrada.</p>

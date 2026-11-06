@@ -101,7 +101,7 @@ def panel():
         if q and not any(q in x for x in (L.norm(r.plate), L.norm(r.code), r.spot)):
             continue
         inn = r.status == "in"
-        rows.append(dict(r=r, inn=inn, due=L.due_of(r) if inn else 0, emp=L.is_emp(r.plate),
+        rows.append(dict(r=r, inn=inn, due=L.due_of(r) if inn else 0, emp=L.is_emp(r.plate), free=L.is_free(r),
                          dur=L.fmt_dur(L.now() - r.checkin) if inn else "—",
                          hora=L.hhmm(r.checkin if inn else r.start)))
     rows.sort(key=lambda x: x["r"].spot)
@@ -149,6 +149,7 @@ def _confirm_info(action, args):
     if action == "out" and r and r.checkin:
         due = L.due_of(r)
         tail = (Markup("Por cobrar: <b>%s</b> en efectivo. El cajón quedará libre.") % L.money(due) if due > 0
+                else Markup("Tarifa de empleado: <b>sin cobro</b>. El cajón quedará libre.") if L.is_free(r) and not r.payments
                 else Markup("Pago completo (%s). El cajón quedará libre.") % L.money(L.paid_of(r)))
         return dict(title="Cobrar y registrar salida" if due > 0 else "Registrar salida", danger=True,
                     ok="Sí, cobrar y salir" if due > 0 else "Sí, registrar salida",
@@ -244,6 +245,7 @@ def do_action(action):
             L.add_payment(r, "efectivo", amount=due)
         L.do_exit(r)
         flash(f"Salida de {r.plate} ({r.spot}). "
-              + (f"Cobrado en efectivo: {L.money(due)}." if due > 0 else f"Ya estaba pagado: {L.money(L.paid_of(r))}.")
-              + (" Empleado: revisar si aplica descuento." if L.is_emp(r.plate) else ""), "ok")
+              + (f"Cobrado en efectivo: {L.money(due)}." if due > 0
+                 else "Tarifa de empleado: sin cobro." if L.is_free(r) and not r.payments
+                 else f"Ya estaba pagado: {L.money(L.paid_of(r))}."), "ok")
     return redirect(url_for("admin.panel") + anchor)

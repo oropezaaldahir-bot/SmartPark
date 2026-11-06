@@ -5,8 +5,8 @@ import random
 import re
 from datetime import datetime, timedelta
 
-from config import AREAS, HOLD, RATE, SPOTS_PER_AREA, TOL, TZ
-from models import Employee, Payment, Plate, Reservation, db
+from config import AREAS, HOLD, RATE, RATE_EMP, SPOTS_PER_AREA, TOL, TZ
+from models import Employee, Payment, Plate, Reservation, Spot, db
 
 HOUR = timedelta(hours=1)
 DEAD = ("cancelled", "expired", "done")
@@ -232,10 +232,21 @@ def reservation_fee(dt):
 # ---------------------------------------------------------------- cobro
 # Se cobra por hora iniciada. Tras pagar hay 15 min (TOL) para salir sin cargo extra;
 # pasado ese tiempo se cobra la diferencia.
+def rate_of(r):
+    """Tarifa por hora de esta visita: la de empleado (por defecto $0) si la placa es de un empleado.
+    Idea de la base de alexishh (categorías General / Trabajador)."""
+    return RATE_EMP if is_emp(r.plate) else RATE
+
+
+def is_free(r):
+    """¿La visita no tiene costo por ser de un empleado?"""
+    return rate_of(r) == 0
+
+
 def cost_of(r, t=None):
     end = t or r.exit_at or now()
     hours = max(1, math.ceil((end - r.checkin) / HOUR))
-    return hours * RATE
+    return hours * rate_of(r)
 
 
 def paid_of(r):
@@ -435,6 +446,24 @@ def chart_svg():
 
 
 # ---------------------------------------------------------------- datos de ejemplo
+def seed_spots():
+    """Crea los cajones que falten en la tabla `lugares`. El primero de cada área es Accesible."""
+    have = {c for (c,) in db.session.query(Spot.code).all()}
+    for a in AREAS:
+        for i, code in enumerate(spot_ids(a["id"])):
+            if code not in have:
+                db.session.add(Spot(code=code, area=a["id"], kind="Accesible" if i == 0 else "Normal"))
+    db.session.commit()
+
+
+def new_folio():
+    """Folio de la pasarela que no se haya usado antes (la base no acepta folios repetidos)."""
+    while True:
+        folio = "PG-%06d" % random.randint(0, 999999)
+        if not Payment.query.filter_by(ref=folio).first():
+            return folio
+
+
 def seed_demo():
     """Carga los vehículos DEMO la primera vez (la base está vacía)."""
     if Reservation.query.count():
