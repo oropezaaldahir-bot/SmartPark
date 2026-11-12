@@ -1,6 +1,11 @@
 # Solo para la cámara (main.py). La página web NO necesita esto.
 # Instala primero requirements.txt y luego este archivo.
-opencv-python
+
+# OpenCV con soporte GUI (versión fijada para evitar que pip
+# instale una variante "headless" o una 5.x pre-release inestable).
+# NO agregar opencv-python-headless: rompe cv2.imshow/waitKey.
+opencv-python==4.10.0.84
+
 easyocr
 ultralytics        # YOLO (instala PyTorch; es pesado)
 numpy
