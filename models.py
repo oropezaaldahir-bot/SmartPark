@@ -89,6 +89,16 @@ class CameraReading(db.Model):
     at = db.Column(db.DateTime, nullable=False)
 
 
+class CameraRequest(db.Model):
+    """La ESP32 pide a la cámara de ese lado que lea la placa del carro que acaba de ver su sensor.
+    La escribe la API (/api); main.py la ve, hace el OCR y la borra al terminar. Caduca sola (SOLICITUD_TTL)."""
+
+    __tablename__ = "solicitudes_camara"
+
+    side = db.Column(db.String(8), primary_key=True)  # entrada | salida (una sola solicitud por lado)
+    at = db.Column(db.DateTime, nullable=False)  # última vez que la ESP32 la pidió
+
+
 class Employee(db.Model):
     __tablename__ = "empleados"
 

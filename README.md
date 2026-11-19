@@ -63,12 +63,20 @@ Las dos ESP32 hablan con Flask por WiFi (HTTP + JSON). Sketches en `esp32/entrad
 | Ruta (todas piden el encabezado `X-API-Key`) | Qué hace |
 |---|---|
 | `POST /api/entrada/estado` `{"cajones":[true,false,...]}` | La ESP32 de entrada reporta sus cajones; se guardan en `lugares.sensor_busy` |
-| `POST /api/entrada/vehiculo` | Llegó un carro: si la cámara de entrada ya leyó la placa, registra la entrada y responde `abrir: true` + el cajón |
+| `POST /api/entrada/vehiculo` | Llegó un carro: pide la lectura a la cámara y, cuando la placa ya está leída, registra la entrada y responde `abrir: true` + el cajón |
+| `POST /api/salida/vehiculo` | Hay un carro en la salida: pide a la cámara de salida que lea la placa |
 | `POST /api/salida/nfc` `{"uid":"04A1B2C3"}` | Se pasó la tarjeta: cobra (simulado), registra la salida y responde `autorizado: true/false` |
 
-La placa la dejan las cámaras (`main.py`) en la tabla nueva `lecturas_camara`; cada lectura se usa **una sola vez** y caduca a
-los `LECTURA_TTL` segundos (120). Flujo de entrada: ESPACIO y **E** en la cámara de entrada → el carro llega al sensor → la barrera abre.
-Flujo de salida: ESPACIO en la cámara de salida → pasar la tarjeta NFC → cobra, abre y registra la salida (ya no hace falta S).
+**Lectura de placa automática (sin teclas).** Cuando el sensor de una ESP32 ve un carro, le pide a Flask que la cámara de
+ese lado lea la placa: la API anota una solicitud en la tabla `solicitudes_camara` (caduca a los `SOLICITUD_TTL` = 10 s y la
+ESP32 la renueva mientras el carro espera) y `main.py` la atiende solo. Para no usar un OCR equivocado, la **misma placa debe
+leerse 2 veces seguidas** (hasta 12 lecturas, `COINCIDENCIAS` / `INTENTOS_AUTO` en `main.py`); si no se logra, la ESP32 vuelve a pedirla.
+- **Entrada:** el carro llega al sensor → la cámara lee y guarda la placa → la ESP32 (que pregunta cada segundo) recibe `abrir: true` + el cajón.
+- **Salida:** el carro llega al sensor → la cámara lee la placa y busca la tarifa → pasar la tarjeta NFC cobra, abre y registra la salida.
+- Las teclas siguen funcionando como respaldo (ESPACIO / E / S). Si la lectura es manual, hazla con el carro ya frente al sensor:
+  al llegar un carro nuevo la ESP32 descarta cualquier lectura vieja (`"nuevo": true`).
+
+La placa leída queda en la tabla `lecturas_camara`; cada lectura se usa **una sola vez** y caduca a los `LECTURA_TTL` segundos (120).
 La seguridad antiatropello se queda en la ESP32 y no se hacen llamadas de red mientras la pluma se mueve.
 
 ## Empleados

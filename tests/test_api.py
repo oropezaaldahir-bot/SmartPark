@@ -111,3 +111,45 @@ def test_salida_placa_que_no_esta_dentro(client):
         db.session.commit()
     j = client.post("/api/salida/nfc", json={"uid": "04A1B2C3"}, headers=H).get_json()
     assert j["autorizado"] is False and j["motivo"] == "notfound"
+
+
+# ------------------------------------------------------------------ el sensor pide la lectura a la cámara
+def test_entrada_pide_la_lectura_a_la_camara(client):
+    assert registro.solicitud_pendiente("entrada") is False
+    client.post("/api/entrada/vehiculo", json={"nuevo": True}, headers=H)
+    assert registro.solicitud_pendiente("entrada") is True
+    registro.cerrar_solicitud("entrada")
+    assert registro.solicitud_pendiente("entrada") is False
+
+
+def test_solicitud_caduca(client):
+    from models import CameraRequest
+    client.post("/api/entrada/vehiculo", json={"nuevo": True}, headers=H)
+    with app.app_context():
+        CameraRequest.query.update({"at": L.now() - timedelta(seconds=config.SOLICITUD_TTL + 5)})
+        db.session.commit()
+    assert registro.solicitud_pendiente("entrada") is False
+
+
+def test_carro_nuevo_descarta_la_lectura_de_otro(client):
+    registro.registrar_placa("ABC-123", "Automóvil")  # quedó una lectura de un carro que nunca llegó a la pluma
+    j = client.post("/api/entrada/vehiculo", json={"nuevo": True}, headers=H).get_json()
+    assert j["abrir"] is False and j["motivo"] == "esperando_placa"
+    with app.app_context():
+        assert CameraReading.query.count() == 0 and Reservation.query.count() == 0
+
+
+def test_sin_nuevo_se_respeta_la_lectura(client):
+    registro.registrar_placa("ABC-123", "Automóvil")
+    assert client.post("/api/entrada/vehiculo", json={}, headers=H).get_json()["abrir"] is True
+
+
+def test_salida_vehiculo_pide_lectura_y_avisa_si_ya_hay(client):
+    j = client.post("/api/salida/vehiculo", json={"nuevo": True}, headers=H).get_json()
+    assert j["lectura"] is False and registro.solicitud_pendiente("salida") is True
+    registro.registrar_placa("ABC-123", "Automóvil")
+    client.post("/api/entrada/vehiculo", json={}, headers=H)
+    registro.consultar_salida("ABC-123")                      # la cámara de salida ya leyó
+    assert client.post("/api/salida/vehiculo", json={}, headers=H).get_json()["lectura"] is True
+    client.post("/api/salida/nfc", json={"uid": "04A1B2C3"}, headers=H)
+    assert registro.solicitud_pendiente("salida") is False   # al usarse la lectura, no queda solicitud

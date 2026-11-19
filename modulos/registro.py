@@ -6,7 +6,10 @@ Después, en la página /acceso solo se deja entrar a las placas que están guar
 """
 from app import app  # al importar crea las tablas si no existen
 import logic as L
-from models import CameraReading, db
+from datetime import timedelta
+
+import config
+from models import CameraReading, CameraRequest, db
 from modulos.placas import tipo_para_bd
 
 
@@ -16,6 +19,30 @@ def _dejar_lectura(lado: str, placa: str):
     CameraReading.query.filter_by(side=lado).delete()
     db.session.add(CameraReading(side=lado, plate_norm=L.norm(placa)[:7], at=L.now()))
     db.session.commit()
+
+
+def solicitud_pendiente(lado: str) -> bool:
+    """¿El sensor de la ESP32 de ese lado está pidiendo que la cámara lea una placa ahora?
+    Nunca lanza excepciones (si la base falla, devuelve False)."""
+    with app.app_context():
+        try:
+            r = db.session.get(CameraRequest, lado)
+            return bool(r and r.at >= L.now() - timedelta(seconds=config.SOLICITUD_TTL))
+        except Exception as e:
+            db.session.rollback()
+            print(f"[BD] Error al consultar la solicitud de {lado}: {e}")
+            return False
+
+
+def cerrar_solicitud(lado: str):
+    """La cámara ya terminó con esa solicitud (leyó la placa o se rindió)."""
+    with app.app_context():
+        try:
+            CameraRequest.query.filter_by(side=lado).delete()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[BD] Error al cerrar la solicitud de {lado}: {e}")
 
 
 def registrar_placa(placa: str, tipo: str = None):

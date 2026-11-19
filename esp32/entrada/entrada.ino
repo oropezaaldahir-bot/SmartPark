@@ -4,9 +4,10 @@
 // Qué hace:
 //   - Mide los 4 cajones y los muestra en la pantalla TFT (como antes).
 //   - Cada 5 s manda el estado de los cajones a Flask:  POST /api/entrada/estado
-//   - Cuando llega un carro al sensor de la pluma, pregunta a Flask si abre:
-//       POST /api/entrada/vehiculo   (Flask usa la placa que leyó la cámara de entrada)
-//     y si Flask dice que sí, abre, espera a que el carro pase y cierra.
+//   - Cuando llega un carro al sensor de la pluma, pregunta a Flask cada segundo si abre:
+//       POST /api/entrada/vehiculo
+//     Esa pregunta también le pide a la cámara de entrada que lea la placa sola (sin teclas).
+//     Si Flask dice que sí, abre, espera a que el carro pase y cierra.
 //   - La seguridad antiatropello es LOCAL: no depende de la red.
 //   - Mientras la barrera se mueve NO se hace ninguna llamada de red.
 //
@@ -84,6 +85,7 @@ unsigned long tLibreReposo = 0;  // desde cuándo el sensor está libre en REPOS
 unsigned long tDespejado = 0;    // desde cuándo está libre en ESPERANDO_PASO
 unsigned long tUltimaPregunta = 0;
 unsigned long tAusente = 0;
+bool primeraPregunta = true;     // la 1ª pregunta de cada carro avisa a Flask que es uno NUEVO
 String cajonAsignado = "";
 
 unsigned long tCajones = 0, tSeguridad = 0, tReporte = 0, tWifi = 0;
@@ -214,11 +216,13 @@ void reportarEstado() {
 }
 
 // 1 = abrir, 0 = todavía no hay placa, -1 = denegado (motivo en 'msgDenegado'), -2 = error de red
+// Preguntar también le pide a la cámara de entrada que lea la placa SOLA (sin teclas): por eso se repite cada segundo.
 String msgDenegado = "";
 int preguntarEntrada() {
   JsonDocument resp;
-  int code = postJson("/api/entrada/vehiculo", "{}", resp);
+  int code = postJson("/api/entrada/vehiculo", primeraPregunta ? "{\"nuevo\":true}" : "{}", resp);
   if (code != 200) return -2;
+  primeraPregunta = false;
   if (resp["abrir"] | false) {
     cajonAsignado = String(resp["cajon"] | "?");
     Serial.printf("[API] ABRIR. Placa %s, cajón %s\n", (const char*)(resp["placa"] | "?"), cajonAsignado.c_str());
@@ -345,6 +349,7 @@ void loop() {
           pantallaMensaje("LEYENDO PLACA...", ST77XX_YELLOW);
           tUltimaPregunta = 0;
           tAusente = 0;
+          primeraPregunta = true;
           cambiar(ESPERANDO_PLACA);
         }
       }

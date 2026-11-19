@@ -4,11 +4,14 @@ Las ESP32 hablan con Flask por WiFi (HTTP + JSON). Todas las rutas piden el enca
 `X-API-Key` (config.ESP32_TOKEN) para que otro aparato de la red no pueda abrir la barrera.
 
   POST /api/entrada/estado    la ESP32 de entrada reporta sus 4 cajones (cada 5 s)
-  POST /api/entrada/vehiculo  llegó un carro: ¿abro? (usa la placa que leyó la cámara de entrada)
+  POST /api/entrada/vehiculo  llegó un carro: pide a la cámara que lea la placa y responde si abre
+  POST /api/salida/vehiculo   llegó un carro a la salida: pide a la cámara que lea la placa
   POST /api/salida/nfc        pasaron la tarjeta NFC: cobra (simulado) y ¿abro? (placa de la cámara de salida)
 
 La seguridad antiatropello NO depende de esta API: se queda en la ESP32.
-La placa la ponen las cámaras (main.py) en la tabla `lecturas_camara`; cada lectura se usa una sola vez.
+Cuando el sensor ve un carro, la ESP32 manda "nuevo": true en su primera pregunta: se descartan lecturas viejas
+y queda una solicitud en `solicitudes_camara`. main.py la ve, lee la placa con la cámara de ese lado (sin teclas) y deja
+el resultado en `lecturas_camara`; cada lectura se usa una sola vez.
 """
 import hmac
 from datetime import timedelta
@@ -17,7 +20,7 @@ from flask import Blueprint, jsonify, request
 
 import config
 import logic as L
-from models import CameraReading, Plate, Spot, db
+from models import CameraReading, CameraRequest, Plate, Spot, db
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -37,9 +40,27 @@ def _lectura(side):
 
 
 def _consumir(side):
-    """Borra las lecturas de esa cámara: una lectura sirve para un solo paso de la barrera."""
+    """Borra las lecturas (y la solicitud) de esa cámara: una lectura sirve para un solo paso de la barrera."""
     CameraReading.query.filter_by(side=side).delete()
+    CameraRequest.query.filter_by(side=side).delete()
     db.session.commit()
+
+
+def _pedir_lectura(side):
+    """Le pide a la cámara de ese lado que lea la placa (la renueva cada vez que la ESP32 pregunta)."""
+    n = L.now()
+    r = db.session.get(CameraRequest, side)
+    if r:
+        r.at = n
+    else:
+        db.session.add(CameraRequest(side=side, at=n))
+    db.session.commit()
+
+
+def _nuevo_ciclo(side):
+    """Llegó un carro distinto: se descarta cualquier lectura que haya quedado de otro."""
+    if (request.get_json(silent=True) or {}).get("nuevo"):
+        _consumir(side)
 
 
 # ------------------------------------------------------------------ ENTRADA
@@ -63,8 +84,10 @@ def entrada_estado():
 def entrada_vehiculo():
     """La ESP32 vio un carro en la entrada. Responde {"abrir": true, "placa", "cajon"} o {"abrir": false, "motivo"}.
     motivo = esperando_placa significa "todavía no hay lectura de la cámara, vuelve a preguntar"."""
+    _nuevo_ciclo("entrada")
     lec = _lectura("entrada")
     if not lec:
+        _pedir_lectura("entrada")  # la cámara de entrada lee la placa sola (main.py)
         return jsonify(ok=True, abrir=False, motivo="esperando_placa", msg="Esperando la lectura de la placa")
     p = Plate.query.filter_by(plate_norm=lec.plate_norm).first()
     res = L.register_entry(lec.plate_norm, source="camara", vehicle_type=p.vehicle_type if p else None,
@@ -77,6 +100,16 @@ def entrada_vehiculo():
 
 
 # ------------------------------------------------------------------ SALIDA
+@bp.post("/salida/vehiculo")
+def salida_vehiculo():
+    """Hay un carro en la salida: pide a la cámara de salida que lea la placa. {"lectura": true} = ya hay una."""
+    _nuevo_ciclo("salida")
+    if _lectura("salida"):
+        return jsonify(ok=True, lectura=True)
+    _pedir_lectura("salida")
+    return jsonify(ok=True, lectura=False)
+
+
 @bp.post("/salida/nfc")
 def salida_nfc():
     """Body: {"uid": "04A1B2C3"}. El pago NFC es SIMULADO: cualquier tarjeta cobra lo que se debe

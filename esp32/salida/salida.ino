@@ -3,7 +3,8 @@
 //
 // Flujo:
 //   1. El sensor ve un carro en la salida (< 15 cm).
-//   2. La cámara de salida (main.py, tecla ESPACIO) lee la placa y la deja para esta barrera.
+//   2. Esta ESP32 le pide a Flask (POST /api/salida/vehiculo, cada 3 s) que la cámara de salida lea la placa
+//      SOLA, sin teclas (main.py). La lectura queda lista para esta barrera.
 //   3. Pasan la tarjeta NFC  ->  POST /api/salida/nfc  {"uid": "..."}
 //      Flask cobra (pago simulado), registra la salida y responde autorizado true/false.
 //   4. Si autorizó: abre, espera a que el carro pase, cierra (y reabre si algo se atraviesa).
@@ -56,7 +57,8 @@ enum Estado { REPOSO, ESPERANDO_NFC, ABRIENDO, ESPERANDO_PASO, CERRANDO, REABRIE
 Estado estado = REPOSO;
 unsigned long tEstado = 0;
 unsigned long tSensor = 0, tReporte = 0, tWifi = 0, tProximaLectura = 0;
-unsigned long tDespejado = 0, tLibreReposo = 0, tAusente = 0;
+unsigned long tDespejado = 0, tLibreReposo = 0, tAusente = 0, tUltimaSolicitud = 0;
+bool primeraSolicitud = true;      // la 1ª solicitud de cada carro avisa a Flask que es uno NUEVO
 float dist = 999;
 int   presencia = 0;
 bool  puedeDetectar = true;
@@ -130,6 +132,14 @@ bool leerTarjetaNFC(String& uidHex) {
     uidHex += b;
   }
   return true;
+}
+
+// Le pide a la cámara de salida que lea la placa (Flask lo deja anotado; main.py lo atiende)
+void solicitarLectura() {
+  JsonDocument resp;
+  int code = postJson("/api/salida/vehiculo", primeraSolicitud ? "{\"nuevo\":true}" : "{}", resp);
+  if (code == 200) primeraSolicitud = false;
+  Serial.printf("[API] lectura de placa solicitada -> HTTP %d%s\n", code, (resp["lectura"] | false) ? " (ya hay placa leída)" : "");
 }
 
 // Resultado de preguntar a Flask si deja salir
@@ -220,7 +230,9 @@ void loop() {
         presencia = 0;
         tAusente = 0;
         tProximaLectura = 0;
-        Serial.println(">> VEHÍCULO DETECTADO. Lee la placa en la cámara de salida y acerca la tarjeta NFC...");
+        primeraSolicitud = true;
+        tUltimaSolicitud = 0;
+        Serial.println(">> VEHÍCULO DETECTADO. La cámara leerá la placa sola; acerca la tarjeta NFC...");
         cambiar(ESPERANDO_NFC);
       }
       break;
@@ -241,6 +253,10 @@ void loop() {
         cambiar(ENFRIAR);
         break;
       }
+      if (ahora - tUltimaSolicitud >= 3000 || tUltimaSolicitud == 0) {   // el motor está parado: se puede usar la red
+        tUltimaSolicitud = ahora;
+        solicitarLectura();
+      }
       if (ahora < tProximaLectura) break;    // pausa tras una respuesta, para no repetir con la tarjeta pegada
 
       String uid;
@@ -254,7 +270,7 @@ void loop() {
           cambiar(ENFRIAR);
         } else {
           // FALTA_PLACA o SIN_RED: se puede volver a intentar sin salir de la ventana
-          Serial.println(r == FALTA_PLACA ? "   (Aún no hay placa leída: pulsa ESPACIO en la cámara y vuelve a pasar la tarjeta)"
+          Serial.println(r == FALTA_PLACA ? "   (La cámara aún no lee la placa: espera unos segundos y vuelve a pasar la tarjeta)"
                                           : "   (Flask no respondió: reintenta)");
           tProximaLectura = millis() + 2000;
         }

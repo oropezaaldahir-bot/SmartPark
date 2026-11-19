@@ -115,7 +115,7 @@ def test_register_entry_conserva_reglas_de_reserva(limpia):
 
 
 # ------------------------------------------------------------------ main.py con cámara simulada
-def _correr_main(monkeypatch, teclas, texto_ocr, modos=("entrada", "salida")):
+def _correr_main(monkeypatch, teclas, texto_ocr, modos=("entrada", "salida"), antes=None):
     """Ejecuta main.main() con cámaras (hilos), OCR, YOLO y ventanas simulados. Devuelve [(modo, texto, estado)]."""
     dibujos = []
     it = iter(teclas)
@@ -151,6 +151,8 @@ def _correr_main(monkeypatch, teclas, texto_ocr, modos=("entrada", "salida")):
     sys.modules.pop("main", None)
     import main
     monkeypatch.setattr(main.cv2, "destroyAllWindows", lambda: None, raising=False)
+    if antes:
+        antes(main)
     main.main(modos)
     sys.modules.pop("main", None)
     return dibujos
@@ -184,6 +186,53 @@ def test_main_texto_ilegible_no_guarda(limpia, monkeypatch):
 def test_main_solo_una_camara(limpia, monkeypatch):
     d = _correr_main(monkeypatch, [32, 101, 113], "EDOMEX A12 BCD", modos=("entrada",))
     assert {t for t, _, _ in d} == {"Camara de ENTRADA"} and placa("A12BCD")
+
+
+# ------------------------------------------------------------------ lectura AUTOMÁTICA (la pide el sensor de la ESP32)
+def _sin_pausas(m):
+    m.PAUSA_OCR = 0
+    m.INTERVALO_SOLICITUD = 0
+
+
+def test_main_lectura_automatica_entrada_sin_teclas(limpia, monkeypatch):
+    from models import CameraReading, CameraRequest
+    with app.app_context():
+        db.session.add(CameraRequest(side="entrada", at=L.now()))
+        db.session.commit()
+    d = _correr_main(monkeypatch, [0, 0, 0, 0, 113], "EDOMEX A12 BCD", modos=("entrada",), antes=_sin_pausas)
+    assert placa("A12BCD")                              # guardada sola, sin ESPACIO ni E
+    assert any("guardada" in e for e in estados_de(d, "ENTRADA"))
+    with app.app_context():
+        assert CameraRequest.query.count() == 0         # la solicitud se cerró
+        assert CameraReading.query.filter_by(side="entrada", plate_norm="A12BCD").count() == 1
+
+
+def test_main_lectura_automatica_sin_solicitud_no_hace_nada(limpia, monkeypatch):
+    _correr_main(monkeypatch, [0, 0, 0, 113], "EDOMEX A12 BCD", modos=("entrada",), antes=_sin_pausas)
+    assert placa("A12BCD") is None
+
+
+def test_main_lectura_automatica_ilegible_se_rinde(limpia, monkeypatch):
+    from models import CameraRequest
+    with app.app_context():
+        db.session.add(CameraRequest(side="entrada", at=L.now()))
+        db.session.commit()
+    d = _correr_main(monkeypatch, [0] * 15 + [113], "MEXICO 2026", modos=("entrada",), antes=_sin_pausas)
+    assert any("No se pudo leer" in e for e in estados_de(d, "ENTRADA"))
+    with app.app_context():
+        assert Plate.query.count() == 0 and CameraRequest.query.count() == 0
+
+
+def test_main_lectura_automatica_salida_busca_la_tarifa(limpia, monkeypatch):
+    from models import CameraReading, CameraRequest
+    _dentro(placa="A12BCD", minutos=30)
+    with app.app_context():
+        db.session.add(CameraRequest(side="salida", at=L.now()))
+        db.session.commit()
+    d = _correr_main(monkeypatch, [0, 0, 0, 0, 113], "EDOMEX A12 BCD", modos=("salida",), antes=_sin_pausas)
+    assert any("Debe pagar $15" in e for e in estados_de(d, "SALIDA"))
+    with app.app_context():
+        assert CameraReading.query.filter_by(side="salida", plate_norm="A12BCD").count() == 1
 
 
 # ------------------------------------------------------------------ interfaz real (si hay OpenCV)

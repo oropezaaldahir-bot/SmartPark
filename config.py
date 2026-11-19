@@ -44,6 +44,8 @@ ESP32_TOKEN = os.getenv("ESP32_TOKEN", "smartpark-esp32")
 ESP32_SPOTS = [s.strip() for s in os.getenv("ESP32_SPOTS", "A01,A02,A03,A04").split(",") if s.strip()]
 # Cuánto vale una lectura de placa de la cámara para abrir la barrera (segundos).
 LECTURA_TTL = int(os.getenv("LECTURA_TTL", "120"))
+# Cuánto vive una solicitud de lectura que hace el sensor (la ESP32 la renueva mientras el carro espera).
+SOLICITUD_TTL = int(os.getenv("SOLICITUD_TTL", "10"))
 
 AREAS = [
     {"id": "A", "n": "Área A", "c": "#2f6fed"},

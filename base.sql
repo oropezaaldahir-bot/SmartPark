@@ -132,6 +132,12 @@ CREATE TABLE IF NOT EXISTS lecturas_camara (
 );
 CREATE INDEX ix_lecturas_camara_side ON lecturas_camara (side);
 
+-- La ESP32 (sensor) le pide a la cámara de ese lado que lea la placa; la API la escribe y main.py la borra.
+CREATE TABLE IF NOT EXISTS solicitudes_camara (
+    side  VARCHAR(8) PRIMARY KEY,                 -- entrada | salida
+    at    TIMESTAMP  NOT NULL
+);
+
 -- Si ya tenías la tabla de una versión anterior, agrega las columnas nuevas:
 --   ALTER TABLE reservaciones ADD COLUMN vehicle_type VARCHAR(12);
 --   ALTER TABLE reservaciones ADD COLUMN source VARCHAR(10);
