@@ -122,6 +122,16 @@ INSERT INTO lugares (code, area, kind) VALUES
 ('F07', 'F', 'Normal'),
 ('F08', 'F', 'Normal');
 
+-- Última placa leída por cada cámara, esperando a su barrera (ESP32). La escribe la cámara (main.py)
+-- y la API (/api) la borra al usarla. En una base que ya existía, la app la crea sola.
+CREATE TABLE IF NOT EXISTS lecturas_camara (
+    id          INTEGER PRIMARY KEY,
+    side        VARCHAR(8)  NOT NULL,             -- entrada | salida
+    plate_norm  VARCHAR(10) NOT NULL,             -- ABC123
+    at          TIMESTAMP   NOT NULL
+);
+CREATE INDEX ix_lecturas_camara_side ON lecturas_camara (side);
+
 -- Si ya tenías la tabla de una versión anterior, agrega las columnas nuevas:
 --   ALTER TABLE reservaciones ADD COLUMN vehicle_type VARCHAR(12);
 --   ALTER TABLE reservaciones ADD COLUMN source VARCHAR(10);

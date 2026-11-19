@@ -49,6 +49,28 @@ Teclas: **ESPACIO** = leer la placa en las cámaras abiertas · **E** = (entrada
 - Se pide confirmar con E / S para no usar una lectura equivocada del OCR.
 - Si la base no responde, la cámara no se cierra: muestra "No se pudo guardar en la base de datos".
 
+## ESP32 de la maqueta (WiFi + API)
+Las dos ESP32 hablan con Flask por WiFi (HTTP + JSON). Sketches en `esp32/entrada/entrada.ino` y `esp32/salida/salida.ino`
+(librerías: ArduinoJson 7.x, Adafruit GFX, Adafruit ST7735 and ST7789, Adafruit PN532).
+
+1. La PC y las ESP32 en la **misma red WiFi** (2.4 GHz). Dale a la PC una IP fija o reservada en el router (ej. `192.168.1.50`)
+   y pon esa IP, el WiFi y la clave de API en la parte de arriba de cada sketch.
+2. `python app.py` ahora escucha en `0.0.0.0:5000` (antes solo `localhost`). El modo debug ya no va por defecto
+   (deja un depurador abierto a la red): actívalo con `FLASK_DEBUG=1`. En Windows, permite el puerto 5000 en el firewall.
+3. Cambia la clave con `ESP32_TOKEN` (igual en los sketches, constante `API_KEY`). Los cajones con sensor son los de
+   `ESP32_SPOTS` (por defecto `A01,A02,A03,A04`, en el orden de los 4 sensores).
+
+| Ruta (todas piden el encabezado `X-API-Key`) | Qué hace |
+|---|---|
+| `POST /api/entrada/estado` `{"cajones":[true,false,...]}` | La ESP32 de entrada reporta sus cajones; se guardan en `lugares.sensor_busy` |
+| `POST /api/entrada/vehiculo` | Llegó un carro: si la cámara de entrada ya leyó la placa, registra la entrada y responde `abrir: true` + el cajón |
+| `POST /api/salida/nfc` `{"uid":"04A1B2C3"}` | Se pasó la tarjeta: cobra (simulado), registra la salida y responde `autorizado: true/false` |
+
+La placa la dejan las cámaras (`main.py`) en la tabla nueva `lecturas_camara`; cada lectura se usa **una sola vez** y caduca a
+los `LECTURA_TTL` segundos (120). Flujo de entrada: ESPACIO y **E** en la cámara de entrada → el carro llega al sensor → la barrera abre.
+Flujo de salida: ESPACIO en la cámara de salida → pasar la tarjeta NFC → cobra, abre y registra la salida (ya no hace falta S).
+La seguridad antiatropello se queda en la ESP32 y no se hacen llamadas de red mientras la pluma se mueve.
+
 ## Empleados
 Las placas que registra el administrador en "Empleados" no pagan el estacionamiento (tarifa de empleado $0;
 cámbiala con `RATE_EMPLEADO`). Entran, salen y se ven en el boleto como "Tarifa de empleado" sin pasar por la pasarela.

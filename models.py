@@ -76,6 +76,19 @@ class Plate(db.Model):
     hits = db.Column(db.Integer, nullable=False, default=1)  # veces que la cámara la detectó
 
 
+class CameraReading(db.Model):
+    """Última placa que leyó cada cámara y que todavía espera a su barrera (ESP32).
+    La cámara (main.py) la escribe; la API (/api) la consume cuando la ESP32 pregunta si abrir.
+    Es una tabla nueva: create_all la crea sola en una base que ya existía."""
+
+    __tablename__ = "lecturas_camara"
+
+    id = db.Column(db.Integer, primary_key=True)
+    side = db.Column(db.String(8), nullable=False, index=True)  # entrada | salida
+    plate_norm = db.Column(db.String(10), nullable=False)  # ABC123
+    at = db.Column(db.DateTime, nullable=False)
+
+
 class Employee(db.Model):
     __tablename__ = "empleados"
 
