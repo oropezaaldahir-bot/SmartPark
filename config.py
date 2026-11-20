@@ -37,6 +37,16 @@ SEED_DEMO = os.getenv("SEED_DEMO", "1") == "1"
 # Con True muestra los avisos de "modo demostración" en la pasarela simulada.
 DEMO_PAGOS = os.getenv("DEMO_PAGOS", "1") == "1"
 
+# ---- ESP32 (maqueta física) ----
+# Clave que las ESP32 mandan en el encabezado X-API-Key. Cámbiala (y ponla igual en los sketches).
+ESP32_TOKEN = os.getenv("ESP32_TOKEN", "smartpark-esp32")
+# Cajones de la web que corresponden a los 4 sensores de la ESP32 de entrada (en el orden de los sensores).
+ESP32_SPOTS = [s.strip() for s in os.getenv("ESP32_SPOTS", "A01,A02,A03,A04").split(",") if s.strip()]
+# Cuánto vale una lectura de placa de la cámara para abrir la barrera (segundos).
+LECTURA_TTL = int(os.getenv("LECTURA_TTL", "120"))
+# Cuánto vive una solicitud de lectura que hace el sensor (la ESP32 la renueva mientras el carro espera).
+SOLICITUD_TTL = int(os.getenv("SOLICITUD_TTL", "10"))
+
 AREAS = [
     {"id": "A", "n": "Área A", "c": "#2f6fed"},
     {"id": "B", "n": "Área B", "c": "#1f9d55"},

@@ -6,8 +6,43 @@ Después, en la página /acceso solo se deja entrar a las placas que están guar
 """
 from app import app  # al importar crea las tablas si no existen
 import logic as L
-from models import db
+from datetime import timedelta
+
+import config
+from models import CameraReading, CameraRequest, db
 from modulos.placas import tipo_para_bd
+
+
+def _dejar_lectura(lado: str, placa: str):
+    """Deja la placa leída para la barrera de ese lado: la API (/api) se la da a la ESP32 cuando pregunta.
+    Solo se conserva la lectura más reciente de cada lado. Debe llamarse dentro de app.app_context()."""
+    CameraReading.query.filter_by(side=lado).delete()
+    db.session.add(CameraReading(side=lado, plate_norm=L.norm(placa)[:7], at=L.now()))
+    db.session.commit()
+
+
+def solicitud_pendiente(lado: str) -> bool:
+    """¿El sensor de la ESP32 de ese lado está pidiendo que la cámara lea una placa ahora?
+    Nunca lanza excepciones (si la base falla, devuelve False)."""
+    with app.app_context():
+        try:
+            r = db.session.get(CameraRequest, lado)
+            return bool(r and r.at >= L.now() - timedelta(seconds=config.SOLICITUD_TTL))
+        except Exception as e:
+            db.session.rollback()
+            print(f"[BD] Error al consultar la solicitud de {lado}: {e}")
+            return False
+
+
+def cerrar_solicitud(lado: str):
+    """La cámara ya terminó con esa solicitud (leyó la placa o se rindió)."""
+    with app.app_context():
+        try:
+            CameraRequest.query.filter_by(side=lado).delete()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[BD] Error al cerrar la solicitud de {lado}: {e}")
 
 
 def registrar_placa(placa: str, tipo: str = None):
@@ -26,6 +61,11 @@ def registrar_placa(placa: str, tipo: str = None):
             return "error", "No se pudo guardar en la base de datos"
         if estado == "invalid":
             return "invalid", "Placa incompleta, no se guardó."
+        try:
+            _dejar_lectura("entrada", p.plate)  # la barrera de entrada (ESP32) abre con esta lectura
+        except Exception as e:
+            db.session.rollback()
+            print(f"[BD] No se pudo dejar la lectura de entrada de {placa}: {e}")
         if estado == "new":
             return "new", f"Placa {p.plate} guardada. Ya puede ingresar."
         return "known", f"Placa {p.plate} ya estaba guardada."
@@ -42,6 +82,7 @@ def consultar_salida(placa: str):
             r = L.inside_by_plate(placa)
             if not r:
                 return "notfound", f"No hay un vehículo dentro con la placa {L.fmt_plate(L.norm(placa)[:7])}."
+            _dejar_lectura("salida", r.plate)  # la ESP32 de salida cobra y abre con esta lectura al pasar la tarjeta NFC
             due = L.due_of(r)
             if due == 0 and L.is_free(r) and not r.payments:
                 return "ok", f"{r.plate}: empleado, sin cobro. Puede salir."

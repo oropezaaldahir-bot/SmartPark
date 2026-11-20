@@ -4,7 +4,8 @@
     python main.py entrada     # solo la de entrada
     python main.py salida      # solo la de salida
 
-Teclas:  ESPACIO -> OCR en las cámaras abiertas (lee la placa; en la de salida también busca la tarifa)
+AUTOMÁTICO: cuando el sensor de la ESP32 ve un carro, la cámara de ese lado lee la placa sola (sin teclas).
+Teclas (opcionales, siguen funcionando):  ESPACIO -> OCR en las cámaras abiertas (lee la placa; en la de salida también busca la tarifa)
          E       -> cámara de ENTRADA: guarda la placa en la base de datos
          S       -> cámara de SALIDA: deja salir SOLO si ya pagó; registra la salida y borra la placa
          q / ESC -> salir
@@ -12,6 +13,7 @@ Teclas:  ESPACIO -> OCR en las cámaras abiertas (lee la placa; en la de salida 
 """
 import os
 import sys
+import time
 
 import cv2
 
@@ -26,9 +28,17 @@ INDICES = {
     "salida": int(os.getenv("CAMARA_SALIDA", "1")),
 }
 AYUDA = {
-    "entrada": "ESPACIO=detectar  E=guardar placa  Q=salir",
-    "salida": "ESPACIO=detectar y cobrar  S=dejar salir  Q=salir",
+    "entrada": "AUTO (sensor)  ESPACIO=detectar  E=guardar placa  Q=salir",
+    "salida": "AUTO (sensor)  ESPACIO=detectar  S=dejar salir  Q=salir",
 }
+
+# Lectura AUTOMÁTICA: cuando el sensor de la ESP32 ve un carro, la API deja una solicitud en la base y esta cámara
+# lee la placa sola (sin teclas). Para no usar una lectura equivocada del OCR, la misma placa debe salir
+# COINCIDENCIAS veces seguidas; si en INTENTOS_AUTO lecturas no se logra, se rinde y la ESP32 vuelve a pedirla.
+INTERVALO_SOLICITUD = 0.3  # s entre consultas a la base
+PAUSA_OCR = 0.6            # s entre lecturas OCR de una misma solicitud
+INTENTOS_AUTO = 12
+COINCIDENCIAS = 2
 TITULO = {"entrada": "Camara de ENTRADA", "salida": "Camara de SALIDA"}
 
 
@@ -75,7 +85,50 @@ def main(modos=("entrada", "salida")):
     mensajes = {m: "" for m in cams}
     estados = {m: "" for m in cams}
     pendientes = {m: None for m in cams}
-    print("ESPACIO -> OCR | E -> guardar placa (entrada) | S -> dejar salir (salida) | q / ESC -> salir")
+    print("AUTO: el sensor de la ESP32 pide la lectura | ESPACIO -> OCR manual | E -> guardar placa (entrada) | "
+          "S -> dejar salir (salida) | q / ESC -> salir")
+
+    auto = {m: None for m in cams}        # lectura automática en curso por cámara
+    ult_consulta = {m: 0.0 for m in cams}
+
+    def paso_automatico(modo, frame, zona):
+        """Atiende la solicitud del sensor: lee la placa varias veces y, si coincide, la guarda (entrada)
+        o busca la tarifa (salida). El resultado queda en la base para que la ESP32 abra la barrera."""
+        ahora = time.monotonic()
+        if ahora - ult_consulta[modo] >= INTERVALO_SOLICITUD:
+            ult_consulta[modo] = ahora
+            pedida = registro.solicitud_pendiente(modo)
+            if pedida and auto[modo] is None:
+                auto[modo] = {"intentos": 0, "ultimo": 0.0, "placa": None, "veces": 0}
+                pendientes[modo], mensajes[modo], estados[modo] = None, "Sensor: leyendo placa...", "Lectura automatica"
+                print(f"[{modo}] El sensor detectó un vehículo: leyendo la placa...")
+            elif not pedida and auto[modo] is not None:
+                auto[modo] = None  # el carro se fue o ya se atendió
+        a = auto[modo]
+        if a is None or frame is None or ahora - a["ultimo"] < PAUSA_OCR:
+            return
+        a["ultimo"] = ahora
+        a["intentos"] += 1
+        texto, pend = procesar_ocr(frame, zona, modo)
+        if pend:
+            a["veces"] = a["veces"] + 1 if pend[0] == a["placa"] else 1
+            a["placa"] = pend[0]
+            mensajes[modo] = texto
+        if pend and a["veces"] >= COINCIDENCIAS:
+            if modo == "entrada":
+                _, estados[modo] = registro.registrar_placa(*pend)
+                print("[entrada] Registro automático:", estados[modo])
+            else:
+                _, estados[modo] = registro.consultar_salida(pend[0])
+                pendientes[modo] = pend
+                print("[salida] Tarifa automática:", estados[modo])
+            registro.cerrar_solicitud(modo)
+            auto[modo] = None
+        elif a["intentos"] >= INTENTOS_AUTO:
+            estados[modo] = "No se pudo leer la placa"
+            print(f"[{modo}] No se pudo leer la placa; la ESP32 volverá a pedirla.")
+            registro.cerrar_solicitud(modo)
+            auto[modo] = None
 
     try:
         while True:
@@ -89,6 +142,9 @@ def main(modos=("entrada", "salida")):
                 zonas[modo] = detector_placa.detectar_zona_placa(frame)  # YOLO en cada frame
                 interfaz.dibujar_frame(frame, mensajes[modo], zonas[modo], titulo=TITULO[modo],
                                        estado=estados[modo], ayuda=AYUDA[modo])
+
+            for modo in cams:  # lectura automática pedida por el sensor de la ESP32
+                paso_automatico(modo, frames[modo], zonas[modo])
 
             tecla = interfaz.leer_tecla()  # una sola vez por vuelta
 

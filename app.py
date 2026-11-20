@@ -9,6 +9,7 @@ from flask import Flask, abort, flash, redirect, render_template, request, send_
 import config
 import logic as L
 from admin import bp as admin_bp
+from api import bp as api_bp
 from models import Reservation, db
 from pasarela import bp as pasarela_bp, start_checkout
 from ticket_png import build as build_png
@@ -23,6 +24,7 @@ app.config.update(
 db.init_app(app)
 app.register_blueprint(pasarela_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(api_bp)  # API JSON de las ESP32
 
 def ensure_columns():
     """Agrega las columnas nuevas si la base ya existía (create_all no modifica tablas)."""
@@ -270,4 +272,7 @@ def reservar_nueva():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # host 0.0.0.0: las ESP32 (y tu celular) entran por la IP de la PC. Con 127.0.0.1 solo entra la propia PC.
+    # El modo debug deja un depurador accesible desde la red, por eso solo se activa con FLASK_DEBUG=1.
+    import os
+    app.run(host=os.getenv("HOST", "0.0.0.0"), port=5000, debug=os.getenv("FLASK_DEBUG", "0") == "1")
